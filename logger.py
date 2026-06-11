@@ -1,65 +1,100 @@
-# ==============================================================================
+# ================================================================================
 # Main Author: 김경민
-# Recently Modified Date: 2026-06-11 (V3.0 Intraday)
-# Dependency: logging, json, os, datetime
-# Description: 콘솔 및 JSON 로그 기록
-# ==============================================================================
+# Recently Modified Date: 2026-06-11 (V3.2 Paper Lab KR + Overseas Futures Final)
+# Dependency: None
+# Description: 시그널과 거래 기록을 JSON 로그 파일로 저장합니다.
+# ================================================================================
 
-"""logger.py
-콘솔에 한글 로그를 출력하고, data/trading_log.json 및 data/signal_log.json 에 JSON 형태로 기록합니다.
-"""
-import logging
+"""JSON list log writer for trading and signal records."""
+
+from __future__ import annotations
+
 import json
-import os
+import logging
 from datetime import datetime
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any
 
-# 로그 디렉터리 보장 (project root 기준)
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-LOG_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(LOG_DIR, exist_ok=True)
+import numpy as np
 
-# 콘솔 로거 설정
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+TRADING_LOG = DATA_DIR / "trading_log.json"
+SIGNAL_LOG = DATA_DIR / "signal_log.json"
+
 logger = logging.getLogger("auto_trader")
 logger.setLevel(logging.INFO)
 if not logger.handlers:
-    ch = logging.StreamHandler()
-    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-    ch.setFormatter(formatter)
-    logger.addHandler(ch)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(handler)
 
-def _append_json(file_path: str, record: Dict[str, Any]):
-    """JSON 리스트 파일에 레코드를 추가합니다.
-    파일이 없으면 [] 로 초기화하고, 기존 리스트에 레코드를 append 합니다.
-    """
-    if not os.path.exists(file_path):
-        data = []
-    else:
-        with open(file_path, "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                if not isinstance(data, list):
-                    data = []
-            except json.JSONDecodeError:
-                data = []
+
+# _ensure_json_list는 로그 파일이 없거나 깨졌을 때 빈 리스트로 복구합니다.
+def _ensure_json_list(path: Path) -> list[Any]:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text("[]", encoding="utf-8")
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+# _append_json은 V3.2 공통 로그 필드를 보강한 뒤 JSON 리스트에 추가합니다.
+def _append_json(path: Path, record: dict[str, Any]) -> None:
+    data = _ensure_json_list(path)
+    record.setdefault("logged_at", datetime.now().isoformat(timespec="seconds"))
+    record.setdefault("asset_class", None)
+    record.setdefault("symbol_or_code", record.get("symbol") or record.get("code"))
+    record.setdefault("market", None)
+    record.setdefault("exchange", None)
+    record.setdefault("currency", None)
+    record.setdefault("regime", None)
+    record.setdefault("qty", None)
+    record.setdefault("contract_qty", None)
+    record.setdefault("qty_by_risk", None)
+    record.setdefault("qty_by_amount", None)
+    record.setdefault("highest_price", None)
+    record.setdefault("mode", None)
+    record.setdefault("paper_sim", False)
+    record.setdefault("order_api_called", False)
+    record.setdefault("is_order_allowed", False)
+    record.setdefault("order_block_reason", None)
+    record.setdefault("capital_krw", None)
+    record.setdefault("tick_size", None)
+    record.setdefault("tick_value_usd", None)
+    record.setdefault("margin_per_contract_usd", None)
+    record.setdefault("required_margin_krw", None)
+    record.setdefault("margin_check_passed", None)
+    record.setdefault("simulated_pnl_krw", None)
+    record.setdefault("regime_source", None)
     data.append(record)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, default=_json_default), encoding="utf-8")
 
-def log_trading(record: Dict[str, Any]):
-    """거래 기록을 JSON 파일에 저장하고 콘솔에 출력합니다.
-    record 예시:
-        {"ticker": "005930", "action": "buy", "price": 72000, "quantity": 10, "timestamp": "2026-06-11T10:00:00"}
-    """
-    file_path = os.path.join(LOG_DIR, "trading_log.json")
-    _append_json(file_path, record)
-    logger.info(f"거래 기록: {record}")
 
-def log_signal(record: Dict[str, Any]):
-    """시그널 로그를 JSON 파일에 저장하고 콘솔에 출력합니다.
-    record 예시:
-        {"ticker": "005930", "intraday_score": 78.5, "gaussian_score": 62.0, "final_score": 71.2, "signal": "buy", "timestamp": "2026-06-11T10:00:00"}
-    """
-    file_path = os.path.join(LOG_DIR, "signal_log.json")
-    _append_json(file_path, record)
-    logger.info(f"시그널 기록: {record}")
+# _json_default는 numpy/pandas 타입을 JSON 직렬화 가능한 기본 타입으로 변환합니다.
+def _json_default(value: Any) -> Any:
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        return float(value)
+    if isinstance(value, (np.bool_,)):
+        return bool(value)
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+# log_trading은 trading_log.json에 거래 기록을 추가합니다.
+def log_trading(record: dict[str, Any]) -> None:
+    _append_json(TRADING_LOG, record)
+    logger.info("거래 기록 저장: %s", record)
+
+
+# log_signal은 signal_log.json에 신호 기록을 추가합니다.
+def log_signal(record: dict[str, Any]) -> None:
+    _append_json(SIGNAL_LOG, record)
+    logger.info("시그널 기록 저장: %s", record)

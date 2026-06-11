@@ -1,77 +1,90 @@
-# README.md
+# auto_trader V3.2 Paper Lab KR + Overseas Futures Final
 
-## KIS Open API 기반 Intraday 자동 매매 봇 (MVP)
+한국투자증권 KIS OpenAPI 기반 intraday auto-trading bot입니다. 이번 버전은 **국내주식 + CME 해외선물 모의투자 준비**만 다룹니다. 해외주식은 제외했습니다.
 
-이 프로젝트는 **한국투자증권(KIS) Open API V3.0** 을 활용한 **데이 트레이딩** 자동화 봇의 첫 번째 MVP 버전입니다.
+최종 목표는 KIS 해외선물 모의투자 계좌에서 `MNQ/MES` 지정가 모의 주문을 실행하는 것입니다. 다만 KIS 해외선물 모의투자 지원 여부, endpoint, TR ID, body field가 공식 문서 또는 샘플 코드로 검증되기 전까지 실제 주문 API 호출은 차단됩니다.
 
-### 주요 특징
-- **Python 전용** 로 구현 (다른 언어 사용 금지)
-- `--dry-run` 옵션으로 실제 주문 없이 시뮬레이션만 수행
-- `yfinance` 로 **005930 (삼성전자), 000660 (SK하이닉스), 035720 (NAVER)** 의 실시간(1분) 데이터를 받아 분석
-- **Gaussian Score Engine** (trend, momentum, fundamental, risk, market 5축) 적용
-- **Intraday Scorer** (5분봉) 와 Gaussian Score 를 혼합하여 `final_score` 계산
-- `final_score` 에 따라 **매수 / 보류 / 회피** (buy/hold/avoid) 신호 출력 (한국어)
-- KIS 실제 주문 모듈은 **stub** 으로 제공되어 절대 실행되지 않음
-- 민감 정보는 `.env.example` 에만 명시하고 실제 `.env` 파일은 **.gitignore**에 추가 (절대 커밋 금지)
+## 대상 자산
 
-### 설치 방법
+국내주식 실험 자본: `5,000,000 KRW`
+
+- `005930` 삼성전자
+- `000660` SK하이닉스
+- `035720` 카카오는 제외 유지
+
+해외선물 전략 배정 자본: `5,000,000 KRW`
+
+- `MNQ` Micro Nasdaq 100 Futures
+- `MES` Micro S&P 500 Futures
+
+`MNQ/MES`는 국내선물이 아니라 CME 해외선물입니다. KIS 국내주식 paper API와 KIS 해외선물 paper API는 다른 상품군이며, KIS 해외선물 OpenAPI/모의투자 지원 여부, endpoint, TR ID, body field는 수동 검증이 필요합니다. 모의계좌 잔고가 5백만원보다 커도 봇은 `FUTURES_PAPER_CAPITAL_KRW=5000000` 안에서만 수량을 계산합니다.
+
+## 실행
+
 ```bash
-# 프로젝트 디렉터리 이동
-cd ~/auto_trader
-
-# 가상환경 생성 (선택)
-python -m venv .venv
-source .venv/bin/activate
-
-# 의존성 설치
-pip install -r requirements.txt
+python main.py --dry-run --asset domestic-stock
+python main.py --paper-check --asset domestic-stock
+python main.py --dry-run --asset futures
+python main.py --paper-check --asset futures
+python main.py --paper --asset futures
+python main.py --paper-sim --asset futures
+python backtest_futures.py --watchlist MNQ,MES --period 60d --capital 5000000
 ```
 
-### 실행 방법 (Dry‑Run)
+국내주식 paper 지정가 주문은 아래 조건을 모두 만족할 때만 호출될 수 있습니다.
+
 ```bash
-python main.py --dry-run
+python main.py --paper --asset domestic-stock --allow-paper-order
 ```
-위 명령을 실행하면 각 종목에 대한 최종 점수와 매수/보류/회피 신호가 콘솔에 한국어로 출력됩니다.
 
-### 백테스트 (Intraday)
+해외선물 KIS paper 지정가 주문의 최종 실행 명령은 아래입니다.
+
 ```bash
-python backtest_intraday.py 005930 --period 60d
-```
-- `--period` 는 조회 기간을 **일(day)** 단위로 지정합니다.
-- 지정된 기간 동안 5분봉으로 점수를 계산하고, 각 구간별 신호 요약을 제공합니다.
-
-### 파일 구조
-```
-auto_trader/
-├─ .env.example          # KIS API 키 샘플 (실제 값은 넣지 않음)
-├─ .gitignore            # 민감 파일 및 캐시 무시
-├─ README.md
-├─ requirements.txt
-├─ logger.py              # 한글 로그 출력 유틸
-├─ main.py                # 진입점 (dry‑run)
-├─ backtest_intraday.py   # 백테스트 스크립트
-└─ core/
-   ├─ technical.py        # 기술 지표 (SMA, EMA, RSI 등)
-   ├─ gaussian_score_engine.py
-   ├─ intraday_scorer.py
-   ├─ fetcher_daily.py    # 일간 데이터 (예비)
-   ├─ fetcher_intraday.py
-   └─ strategy.py
+python main.py --paper --asset futures --allow-paper-order
 ```
 
-### 주의 사항
-- **실제 주문** 은 아직 구현되지 않았으며, `kis_order_stub.py` 로 대체되었습니다. 나중에 실제 주문 로직을 연결하기 전까지는 절대 활성화되지 않으니 안심하세요.
-- `.env` 파일은 자동으로 생성되지 않으며, 반드시 **`.env.example`** 을 복사해서 사용자는 직접 채워야 합니다.
-- 모든 출력 및 주석은 **한국어** 로 작성되었습니다.
+단, `paper-check` 성공, `KIS_MODE=paper`, `ENABLE_REAL_ORDER=False`, `ENABLE_FUTURES_KIS_PAPER_ORDER=True`, contract metadata의 `is_kis_paper_order_enabled=True`, KIS 해외선물 TR ID/endpoint/body field 검증 완료, 현재가 조회 성공, margin check 통과, daily trade limit 통과, 전략 신호 통과 조건이 모두 맞아야 합니다. 현재 기본값은 차단입니다.
 
----
+## Paper-Sim 체결 모델
 
-### 향후 작업 계획
-1. 실제 KIS 주문 모듈 구현 및 테스트 (안전 검증 후 활성화)
-2. 추가 기술 지표 및 파라미터 튜닝
-3. 리스크 관리 로직 (포지션 사이징, 손절/익절) 추가
-4. Docker 이미지 제공 및 CI/CD 파이프라인 구축
+해외선물 paper-sim은 보조 기능입니다. 실제 KIS 주문 API를 호출하지 않고 `data/paper_positions.json`, `data/paper_trades.json`, `data/paper_equity.json`만 갱신합니다.
 
----
+- 롱 진입 limit buy: 다음 봉 `Low <= limit_price`이면 체결, 체결가 `limit_price + 1 tick`
+- 롱 청산 limit sell: 다음 봉 `High >= limit_price`이면 체결, 체결가 `limit_price - 1 tick`
+- 손절: 다음 봉 `Low <= stop_loss`이면 체결, 체결가 `stop_loss - 1 tick`
+- 목표가: 다음 봉 `High >= target`이면 체결, 체결가 `target - 1 tick`
+- 같은 봉에서 손절과 목표가가 모두 닿으면 보수적으로 손절 우선
 
-> 프로젝트에 대한 질문이나 개선 요청이 있으면 언제든 알려 주세요!
+손익 계산:
+
+```text
+pnl_usd = (price_move / tick_size) * tick_value_usd * qty
+pnl_krw = pnl_usd * FX_RATE_USDKRW
+```
+
+증거금 체크:
+
+```text
+required_margin_krw = margin_per_contract_usd * qty * FX_RATE_USDKRW
+required_margin_krw <= FUTURES_PAPER_CAPITAL_KRW * 0.8
+```
+
+## TODO
+
+- KIS 해외선물 모의투자 지원 여부 확인
+- KIS 해외선물 endpoint/TR ID/body field 수동 검증
+- KIS 해외선물 현재가/잔고/증거금/미결제/지정가 주문 API 샘플 코드 대조
+- KIS 해외선물 모의계좌 상품코드와 MNQ/MES 월물/거래소코드 매핑 검증
+- MNQ/MES tick size, tick value, margin, 거래시간 수동 검증
+- yfinance `MNQ=F`, `MES=F`는 front-month 연속 데이터라 롤오버 갭 검증 필요
+- CME/KIS 해외선물 정확한 maintenance break 검증
+- 숏 진입은 V3.3에서 별도 구현
+- 실거래 수수료/환전/슬리피지 모델 정교화
+
+## 안전 조건
+
+- 기본 실행은 주문 없는 dry-run입니다.
+- 실전 주문은 `ENABLE_REAL_ORDER=True`와 `--live` 없이는 차단됩니다.
+- 시장가 주문은 사용하지 않습니다. 지정가만 사용합니다.
+- `.env`, API 키, 계좌번호, access token은 커밋하지 마세요.
+- 백테스트와 paper-sim 성과는 실전 수익을 보장하지 않습니다.

@@ -1,13 +1,15 @@
-# .gitignore
 .env
-token.json
-positions.json
-trading_log.json
-signal_log.json
+data/token.json
+data/positions.json
+data/trading_log.json
+data/signal_log.json
+data/cron.log
+data/intraday_cache/
+**pycache**/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 *.egg-info/
-.dist/
 build/
+dist/
