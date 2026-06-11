@@ -1,0 +1,13 @@
+# .gitignore
+.env
+token.json
+positions.json
+trading_log.json
+signal_log.json
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.dist/
+build/
