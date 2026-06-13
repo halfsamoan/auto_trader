@@ -65,7 +65,7 @@ def _latest_time(df: pd.DataFrame) -> time | None:
     return ts.time()
 
 
-def compute_intraday_details(df: pd.DataFrame) -> IntradayScore:
+def compute_intraday_details(df: pd.DataFrame, apply_time_filter: bool = True) -> IntradayScore:
     bars = to_5m(df)
     if bars.empty or len(bars) < 5:
         return IntradayScore(50.0, "insufficient_data", False, None, 50, 50, 50, 50, 50, 50, 50, np.nan, np.nan, np.nan, np.nan, 0, 0)
@@ -108,7 +108,7 @@ def compute_intraday_details(df: pd.DataFrame) -> IntradayScore:
     volume_ratio = latest_volume / avg_vol if avg_vol else 1.0
     volume_score = clamp_score(45 + min(volume_ratio, 3.0) * 18)
 
-    atr_series = atr(bars, 14)
+    atr_series = atr(bars, 10)
     latest_atr = float(atr_series.dropna().iloc[-1]) if not atr_series.dropna().empty else price * 0.01
     atr_pct = latest_atr / price if price else 0.01
     risk_score = clamp_score(100 - atr_pct * 2500)
@@ -130,9 +130,9 @@ def compute_intraday_details(df: pd.DataFrame) -> IntradayScore:
         reason = "return_30m > 5%"
     elif pct_b > 0.95:
         reason = "pct_b > 0.95"
-    elif current_time is not None and current_time < time(9, 10):
+    elif apply_time_filter and current_time is not None and current_time < time(9, 10):
         reason = "09:10 전 신규 진입 금지"
-    elif current_time is not None and current_time >= time(14, 50):
+    elif apply_time_filter and current_time is not None and current_time >= time(14, 50):
         reason = "14:50 이후 신규 진입 금지"
 
     return IntradayScore(

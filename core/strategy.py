@@ -14,6 +14,8 @@ from typing import Any
 
 import pandas as pd
 
+from config import MIN_TARGET1_PROFIT_PCT
+
 from .technical import atr, ensure_ohlcv
 
 
@@ -26,18 +28,21 @@ class StrategyPlan:
     rr_ratio: float
     skip: bool
     skip_reason: str | None
+    target1_expected_profit_pct: float = 0.0
+    min_target1_profit_pct: float = MIN_TARGET1_PROFIT_PCT
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def calculate_intraday_plan(df: pd.DataFrame) -> StrategyPlan:
+def calculate_intraday_plan(df: pd.DataFrame, min_target1_profit_pct: float | None = None) -> StrategyPlan:
+    threshold = MIN_TARGET1_PROFIT_PCT if min_target1_profit_pct is None else float(min_target1_profit_pct)
     data = ensure_ohlcv(df)
     if data.empty:
-        return StrategyPlan(0.0, 0.0, 0.0, 0.0, 0.0, True, "데이터 없음")
+        return StrategyPlan(0.0, 0.0, 0.0, 0.0, 0.0, True, "데이터 없음", 0.0, threshold)
 
     entry = float(data["Close"].iloc[-1])
-    atr_series = atr(data, 14)
+    atr_series = atr(data, 10)
     atr_5m = float(atr_series.dropna().iloc[-1]) if not atr_series.dropna().empty else entry * 0.008
     if atr_5m <= 0:
         atr_5m = entry * 0.008
@@ -55,8 +60,8 @@ def calculate_intraday_plan(df: pd.DataFrame) -> StrategyPlan:
         skip_reason = "rr_ratio < 1.2"
     elif stop_distance > 0.015:
         skip_reason = "stop_loss distance > 1.5%"
-    elif expected_profit < 0.006:
-        skip_reason = "target1 expected profit < 0.6%"
+    elif expected_profit < threshold:
+        skip_reason = f"target1 expected profit < {threshold * 100:.2f}%"
 
     return StrategyPlan(
         entry=entry,
@@ -66,4 +71,6 @@ def calculate_intraday_plan(df: pd.DataFrame) -> StrategyPlan:
         rr_ratio=rr_ratio,
         skip=skip_reason is not None,
         skip_reason=skip_reason,
+        target1_expected_profit_pct=expected_profit,
+        min_target1_profit_pct=threshold,
     )

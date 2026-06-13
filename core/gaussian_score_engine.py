@@ -19,11 +19,11 @@ from .technical import atr, clamp_score, ensure_ohlcv, rsi, sma
 class GaussianScoreEngine:
     def __init__(self) -> None:
         self.weights = {
-            "trend": 0.30,
-            "momentum": 0.25,
-            "fundamental": 0.20,
-            "risk": 0.15,
-            "market": 0.10,
+            "trend": 0.40,
+            "momentum": 0.40,
+            "fundamental": 0.00,
+            "risk": 0.20,
+            "market": 0.00,
         }
 
     def _calc_trend(self, df: pd.DataFrame) -> float:
@@ -102,9 +102,9 @@ class GaussianScoreEngine:
     def compute(self, ticker: str, df: pd.DataFrame) -> dict[str, float]:
         trend = self._calc_trend(df)
         momentum = self._calc_momentum(df)
-        fundamental = self._calc_fundamental(ticker)
+        fundamental = 50.0
         risk = self._calc_risk(df)
-        market = self._calc_market()
+        market = 50.0
         gaussian_score = (
             trend * self.weights["trend"]
             + momentum * self.weights["momentum"]

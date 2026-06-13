@@ -87,7 +87,7 @@ def remove_position(code: str) -> None:
 
 # _latest_atr은 5분봉 ATR을 계산하고 부족하면 가격의 0.8%를 fallback으로 사용합니다.
 def _latest_atr(data: pd.DataFrame, price: float) -> float:
-    atr_series = atr(data, 14)
+    atr_series = atr(data, 10)
     clean = atr_series.dropna()
     latest = float(clean.iloc[-1]) if not clean.empty else price * 0.008
     return latest if latest > 0 else price * 0.008

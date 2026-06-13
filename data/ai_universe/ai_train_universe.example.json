@@ -1,0 +1,32 @@
+[
+  {
+    "code": "005930",
+    "name": "005930",
+    "market": "KR",
+    "source": "fallback"
+  },
+  {
+    "code": "000660",
+    "name": "000660",
+    "market": "KR",
+    "source": "fallback"
+  },
+  {
+    "code": "005380",
+    "name": "005380",
+    "market": "KR",
+    "source": "fallback"
+  },
+  {
+    "code": "000270",
+    "name": "000270",
+    "market": "KR",
+    "source": "fallback"
+  },
+  {
+    "code": "035420",
+    "name": "035420",
+    "market": "KR",
+    "source": "fallback"
+  }
+]

@@ -43,7 +43,7 @@ class RiskManager:
         if len(data) < 15:
             return True, None
         price = float(data["Close"].iloc[-1])
-        atr_series = atr(data, 14)
+        atr_series = atr(data, 10)
         latest_atr = float(atr_series.dropna().iloc[-1]) if not atr_series.dropna().empty else price * 0.01
         atr_pct = latest_atr / price if price else 1.0
         recent_jump = (price / data["Close"].iloc[-4] - 1) * 100 if len(data) >= 4 and data["Close"].iloc[-4] else 0.0

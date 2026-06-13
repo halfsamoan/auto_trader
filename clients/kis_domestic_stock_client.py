@@ -12,9 +12,11 @@ from __future__ import annotations
 import math
 from typing import Any
 
+import pandas as pd
 import requests
 
 from config import ENABLE_DOMESTIC_STOCK_PAPER_ORDER, ENABLE_REAL_ORDER
+from core.technical import ensure_ohlcv
 
 from .kis_base_client import KISBaseClient
 
@@ -58,6 +60,57 @@ class DomesticStockClient(KISBaseClient):
         data = response.json()
         price = (data.get("output") or {}).get("stck_prpr")
         return float(price) if price else None
+
+    # get_intraday_5m_chart는 KIS 국내주식 시세조회 API만 사용해 최근 분봉을 조회합니다.
+    def get_intraday_5m_chart(self, code: str) -> pd.DataFrame:
+        token = self.get_access_token()
+        if not token:
+            return pd.DataFrame()
+        url = f"{self.base_url}/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice"
+        params = {
+            "FID_ETC_CLS_CODE": "",
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": code,
+            "FID_INPUT_HOUR_1": "153000",
+            "FID_PW_DATA_INCU_YN": "Y",
+        }
+        self.rate_limit()
+        response = requests.get(url, headers=self.headers(token, "FHKST03010200"), params=params, timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+        rows = payload.get("output2") or []
+        parsed = []
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            date = str(row.get("stck_bsop_date") or "").strip()
+            time_value = str(row.get("stck_cntg_hour") or "").strip().zfill(6)
+            if not date or not time_value:
+                continue
+            try:
+                timestamp = pd.Timestamp(f"{date} {time_value}", tz="Asia/Seoul")
+                parsed.append(
+                    {
+                        "Datetime": timestamp,
+                        "Open": float(str(row.get("stck_oprc") or row.get("stck_prpr") or 0).replace(",", "")),
+                        "High": float(str(row.get("stck_hgpr") or row.get("stck_prpr") or 0).replace(",", "")),
+                        "Low": float(str(row.get("stck_lwpr") or row.get("stck_prpr") or 0).replace(",", "")),
+                        "Close": float(str(row.get("stck_prpr") or 0).replace(",", "")),
+                        "Volume": float(str(row.get("cntg_vol") or row.get("acml_vol") or 0).replace(",", "")),
+                    }
+                )
+            except (TypeError, ValueError):
+                continue
+        if not parsed:
+            return pd.DataFrame()
+        frame = pd.DataFrame(parsed).drop_duplicates("Datetime", keep="last").set_index("Datetime").sort_index()
+        frame = ensure_ohlcv(frame)
+        if frame.empty:
+            return frame
+        resampled = frame.resample("5min", origin="start_day", label="left", closed="left").agg(
+            {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
+        )
+        return ensure_ohlcv(resampled.dropna(subset=["Open", "High", "Low", "Close"]))
 
     # calc_qty는 금액 기준 국내주식 수량을 계산합니다.
     def calc_qty(self, code: str, amount_krw: float) -> int:

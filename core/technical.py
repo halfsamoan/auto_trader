@@ -85,11 +85,11 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.rolling(window=period, min_periods=period).mean()
 
 
-def macd(series: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
-    fast = series.ewm(span=12, adjust=False).mean()
-    slow = series.ewm(span=26, adjust=False).mean()
+def macd(series: pd.Series, fast_period: int = 6, slow_period: int = 13, signal_period: int = 5) -> tuple[pd.Series, pd.Series, pd.Series]:
+    fast = series.ewm(span=fast_period, adjust=False).mean()
+    slow = series.ewm(span=slow_period, adjust=False).mean()
     line = fast - slow
-    signal = line.ewm(span=9, adjust=False).mean()
+    signal = line.ewm(span=signal_period, adjust=False).mean()
     hist = line - signal
     return line, signal, hist
 
@@ -108,5 +108,10 @@ def vwap(df: pd.DataFrame) -> pd.Series:
         return pd.Series(dtype=float)
     typical = (data["High"] + data["Low"] + data["Close"]) / 3
     volume = data["Volume"].fillna(0)
+    if isinstance(data.index, pd.DatetimeIndex):
+        session = data.index.tz_convert("Asia/Seoul").date if data.index.tz is not None else data.index.date
+        weighted_sum = (typical * volume).groupby(session).cumsum()
+        denom = volume.groupby(session).cumsum().replace(0, np.nan)
+        return weighted_sum / denom
     denom = volume.cumsum().replace(0, np.nan)
     return (typical * volume).cumsum() / denom
