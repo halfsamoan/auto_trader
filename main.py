@@ -33,6 +33,7 @@ from config import (
     FUTURES_PAPER_CAPITAL_KRW,
     FUTURES_WATCHLIST,
     FX_RATE_USDKRW,
+    LEVERAGE_ETN_WATCHLIST,
     MAX_BUYS_PER_DAY,
     MAX_BUY_CANDIDATES_PER_LOOP,
     MAX_NEW_POSITIONS_PER_DAY,
@@ -57,7 +58,7 @@ from core.gaussian_score_engine import GaussianScoreEngine
 from core.intraday_scorer import compute_intraday_details
 from core.market_regime import get_current_market_regime
 from core.strategy import calculate_intraday_plan
-from core.technical import ensure_ohlcv, sma
+from core.technical import atr, ensure_ohlcv, rsi, sma
 from futures_contracts import get_contract
 from logger import TRADING_LOG, log_signal, log_trading
 from paper_simulator import PaperSimulator
@@ -118,6 +119,14 @@ def domestic_stock_signal(code: str, mode: str, account_value: float, available_
     gaussian = engine.compute(code, daily_df)
     intraday = compute_intraday_details(intraday_df)
     strategy = calculate_intraday_plan(intraday_df)
+    atr_series = atr(intraday_df, 14).dropna()
+    latest_atr = float(atr_series.iloc[-1]) if not atr_series.empty else None
+    rsi_series = rsi(intraday_df["Close"], 14).dropna() if "Close" in intraday_df else []
+    latest_rsi = float(rsi_series.iloc[-1]) if len(rsi_series) else None
+    price = float(intraday.price) if intraday.price == intraday.price else 0.0
+    vwap_distance_pct = ((price / float(intraday.vwap) - 1.0) * 100.0) if price and intraday.vwap else None
+    ma20_distance_pct = ((price / float(intraday.ma20) - 1.0) * 100.0) if price and intraday.ma20 else None
+    recent_volume = float(intraday_df["Volume"].iloc[-1]) if "Volume" in intraday_df and len(intraday_df) else None
     final_score = 0.90 * intraday.score + 0.10 * gaussian["gaussian_score"]
     risk_allowed, risk_reason = risk_manager.entry_check(code, intraday_df)
     reasons = []
@@ -139,6 +148,7 @@ def domestic_stock_signal(code: str, mode: str, account_value: float, available_
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "asset_class": "domestic-stock",
         "symbol_or_code": code,
+        "symbol": code,
         "code": code,
         "market": "KR",
         "currency": "KRW",
@@ -151,11 +161,24 @@ def domestic_stock_signal(code: str, mode: str, account_value: float, available_
         "target1_expected_profit_pct": round(strategy.target1_expected_profit_pct, 6),
         "min_target1_profit_pct": strategy.min_target1_profit_pct,
         "skip_reason": strategy.skip_reason,
+        "entry": float(strategy.entry),
+        "stop_loss": float(strategy.stop_loss),
+        "target1": float(strategy.target1),
+        "target2": float(strategy.target2),
+        "atr": latest_atr,
+        "rsi": latest_rsi,
+        "vwap_distance_pct": round(float(vwap_distance_pct), 6) if vwap_distance_pct is not None else None,
+        "ma20_distance_pct": round(float(ma20_distance_pct), 6) if ma20_distance_pct is not None else None,
+        "recent_volume": recent_volume,
+        "spread_pct": None,
         "qty": sizing["qty"],
         "qty_by_risk": sizing["qty_by_risk"],
         "qty_by_amount": sizing["qty_by_amount"],
         "signal": signal,
+        "rule_signal": signal,
         "reasons": reasons,
+        "block_reason": None,
+        "future_label_status": "pending",
         "capital_krw": account_value,
         "order_api_called": False,
         "is_order_allowed": False,
@@ -251,6 +274,9 @@ def _liquidity_fields(code: str, intraday_df: Any | None = None) -> dict[str, An
             "volume_zscore": None,
             "liquidity_reject_reason": f"intraday_unavailable:{exc}",
             "spread_available": False,
+            "missing_orderbook": True,
+            "missing_orderbook_reason": "intraday_unavailable",
+            "spread_pct": None,
         }
     if data.empty or len(data) < 20:
         return {
@@ -259,6 +285,9 @@ def _liquidity_fields(code: str, intraday_df: Any | None = None) -> dict[str, An
             "volume_zscore": None,
             "liquidity_reject_reason": "5분봉 유동성 판단 데이터 부족",
             "spread_available": False,
+            "missing_orderbook": True,
+            "missing_orderbook_reason": "intraday_data_insufficient",
+            "spread_pct": None,
         }
     latest = data.iloc[-1]
     close = _safe_float(latest.get("Close"))
@@ -288,8 +317,35 @@ def _liquidity_fields(code: str, intraday_df: Any | None = None) -> dict[str, An
         "liquidity_score": round(float(liquidity_score), 6),
         "volume_zscore": round(float(volume_zscore), 6),
         "recent_turnover_krw": round(float(recent_turnover), 2),
+        "recent_volume": volume,
         "spread_available": spread_available,
+        "missing_orderbook": not spread_available,
+        "missing_orderbook_reason": None if spread_available else "orderbook_or_spread_unavailable",
+        "spread_pct": None,
         "liquidity_reject_reason": ";".join(reasons) if reasons else None,
+    }
+
+
+def _watch_only_leveraged_etn_record(item: dict[str, Any], mode: str, bar_key: str | None = None) -> dict[str, Any]:
+    code = str(item.get("code") or item.get("symbol") or "520100").zfill(6)
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "asset_class": "domestic-stock",
+        "symbol_or_code": code,
+        "symbol": code,
+        "code": code,
+        "mode": mode,
+        "bar_key": bar_key,
+        "watch_only": True,
+        "order_route_enabled": False,
+        "position_sizing_enabled": False,
+        "signal": "watch-only",
+        "rule_signal": "watch-only",
+        "block_reason": "watch_only_leveraged_etn",
+        "order_block_reason": "watch_only_leveraged_etn",
+        "order_api_called": False,
+        "is_order_allowed": False,
+        "future_label_status": "pending",
     }
 
 
@@ -366,6 +422,7 @@ def _log_paper_watch_order(record: dict[str, Any], side: str, result: dict[str, 
         "order_api_called": order_api_called,
         "is_order_allowed": order_api_called,
         "order_block_reason": None if order_api_called else result.get("reason", "주문 조건 미충족"),
+        "block_reason": None if order_api_called else result.get("reason", "주문 조건 미충족"),
     }
     log_signal(order_record)
     if order_api_called:
@@ -430,6 +487,8 @@ def _policy_shadow_fields(record: dict[str, Any], code: str, policy_engine: Any 
                 "bt_shadow_only": True,
             }
         )
+    fields["ai_policy_confidence"] = fields.get("confidence")
+    fields["bt_would_enter"] = fields.get("bt_would_action") == "BUY_LIMIT"
     return fields
 
 
@@ -565,13 +624,21 @@ def _run_domestic_entry_checks(
     bt_execute_requested: bool = False,
 ) -> None:
     positions = load_positions()
-    scan_items = WATCHLIST[: max(int(MAX_SCAN_SYMBOLS), 1)] if ENABLE_DYNAMIC_TRADE_UNIVERSE else WATCHLIST
+    trade_scan_items = WATCHLIST[: max(int(MAX_SCAN_SYMBOLS), 1)] if ENABLE_DYNAMIC_TRADE_UNIVERSE else WATCHLIST
+    scan_items = [*trade_scan_items, *LEVERAGE_ETN_WATCHLIST]
     records: list[dict[str, Any]] = []
     buy_candidates: list[dict[str, Any]] = []
+    missing_orderbook_count = 0
     rejected_by_liquidity_count = 0
     for item in scan_items:
         code = item["code"]
         try:
+            if item.get("watch_only") or not item.get("order_route_enabled", True):
+                record = _watch_only_leveraged_etn_record(item, "paper-watch", bar_key)
+                record["universe_size"] = len(WATCHLIST)
+                record["scanned_symbol_count"] = len(scan_items)
+                records.append(record)
+                continue
             record = domestic_stock_signal(code, "paper-watch", cash, cash)
             record["bar_key"] = bar_key
             record.update(_ai_shadow_fields(record, code, ai_engine, ai_gate))
@@ -586,7 +653,9 @@ def _run_domestic_entry_checks(
             record["bt_execute_enabled"] = bool(ENABLE_BT_EXECUTE)
             record["universe_size"] = len(WATCHLIST)
             record["scanned_symbol_count"] = len(scan_items)
-            if not record.get("liquidity_passed"):
+            if record.get("missing_orderbook"):
+                missing_orderbook_count += 1
+            elif not record.get("liquidity_passed"):
                 rejected_by_liquidity_count += 1
             if (
                 record.get("ai_action") == "BUY"
@@ -622,6 +691,7 @@ def _run_domestic_entry_checks(
         "buy_candidate_count": len(buy_candidates),
         "top_candidates": [_candidate_snapshot(row) for row in ranked_candidates[:10]],
         "selected_candidates": [_candidate_snapshot(row) for row in selected_candidates],
+        "missing_orderbook_count": missing_orderbook_count,
         "rejected_by_liquidity_count": rejected_by_liquidity_count,
         "max_buy_candidates_per_loop": MAX_BUY_CANDIDATES_PER_LOOP,
         "max_new_positions_per_day": MAX_NEW_POSITIONS_PER_DAY,
@@ -632,6 +702,11 @@ def _run_domestic_entry_checks(
 
     for record in records:
         code = str(record["code"])
+        if record.get("watch_only") or not record.get("order_route_enabled", True):
+            record.update(summary_base)
+            log_signal(record)
+            print(f"{code}: watch-only leveraged ETN - 주문 차단")
+            continue
         counts = _today_order_counts()
         block_reason = None
         price = float(record["strategy"]["entry"])
@@ -689,6 +764,7 @@ def _run_domestic_entry_checks(
         if code in selected_codes and block_reason:
             rejected_by_risk_count += 1
         if block_reason:
+            record["block_reason"] = block_reason
             record["order_block_reason"] = block_reason
             record["order_api_called"] = False
             record["is_order_allowed"] = False
@@ -742,13 +818,22 @@ def _bar_key_str(epoch: int) -> str:
 
 def _run_policy_no_order_shadow(policy_engine: Any | None, bt_shadow: bool) -> None:
     positions = load_positions()
-    scan_items = WATCHLIST[: max(int(MAX_SCAN_SYMBOLS), 1)]
+    scan_items = [*WATCHLIST[: max(int(MAX_SCAN_SYMBOLS), 1)], *LEVERAGE_ETN_WATCHLIST]
     records: list[dict[str, Any]] = []
     buy_candidates: list[dict[str, Any]] = []
+    missing_orderbook_count = 0
     rejected_by_liquidity_count = 0
     for item in scan_items:
         code = item["code"]
         try:
+            if item.get("watch_only") or not item.get("order_route_enabled", True):
+                record = _watch_only_leveraged_etn_record(item, "paper-watch")
+                record["universe_size"] = len(WATCHLIST)
+                record["scanned_symbol_count"] = len(scan_items)
+                records.append(record)
+                log_signal(record)
+                print(f"{code}: watch-only leveraged ETN - 주문 차단")
+                continue
             record = domestic_stock_signal(code, "paper-watch", DOMESTIC_STOCK_CAPITAL_KRW, DOMESTIC_STOCK_CAPITAL_KRW)
             record.update(_policy_shadow_fields(record, code, policy_engine, bt_shadow, code in positions))
             record.update(_liquidity_fields(code))
@@ -757,7 +842,9 @@ def _run_policy_no_order_shadow(policy_engine: Any | None, bt_shadow: bool) -> N
             record["dynamic_trade_universe_enabled"] = bool(ENABLE_DYNAMIC_TRADE_UNIVERSE)
             record["universe_size"] = len(WATCHLIST)
             record["scanned_symbol_count"] = len(scan_items)
-            if not record.get("liquidity_passed"):
+            if record.get("missing_orderbook"):
+                missing_orderbook_count += 1
+            elif not record.get("liquidity_passed"):
                 rejected_by_liquidity_count += 1
             if (
                 record.get("ai_action") == "BUY"
@@ -765,6 +852,7 @@ def _run_policy_no_order_shadow(policy_engine: Any | None, bt_shadow: bool) -> N
             ):
                 buy_candidates.append(record)
             records.append(record)
+            record["block_reason"] = "--allow-paper-order가 없어 국내주식 paper-watch 주문 차단"
             record["order_block_reason"] = "--allow-paper-order가 없어 국내주식 paper-watch 주문 차단"
             record["order_api_called"] = False
             record["is_order_allowed"] = False
@@ -786,6 +874,7 @@ def _run_policy_no_order_shadow(policy_engine: Any | None, bt_shadow: bool) -> N
             "top_candidates": [_candidate_snapshot(row) for row in ranked_candidates[:10]],
             "selected_candidates": [_candidate_snapshot(row) for row in selected_candidates],
             "rejected_by_risk_count": len(selected_candidates),
+            "missing_orderbook_count": missing_orderbook_count,
             "rejected_by_liquidity_count": rejected_by_liquidity_count,
             "final_order_candidates": [],
             "order_api_called": False,
@@ -835,6 +924,9 @@ def run_domestic_stock_paper_watch(
             }
         )
         return 0
+    if allow_paper_order:
+        print("국내주식 paper-watch audit mode: --allow-paper-order가 있어도 주문 API를 호출하지 않습니다.")
+        allow_paper_order = False
     if not allow_paper_order:
         print("국내주식 paper-watch 차단: --allow-paper-order가 없습니다.")
         if ai_policy or bt_shadow:
@@ -1140,6 +1232,44 @@ def run_futures_paper_sim() -> int:
                 continue
             signal_data = full_data.iloc[:-1].copy()
             next_bar = full_data.iloc[-1]
+            settlement = simulator.settle_futures_position(
+                symbol,
+                high=float(next_bar["High"]),
+                low=float(next_bar["Low"]),
+                close=float(next_bar["Close"]),
+                timestamp=datetime.now().isoformat(timespec="seconds"),
+            )
+            if settlement.get("settled"):
+                log_signal(
+                    {
+                        "timestamp": datetime.now().isoformat(timespec="seconds"),
+                        "asset_class": "futures",
+                        "symbol": symbol,
+                        "mode": "paper-sim",
+                        "signal": "exit",
+                        "paper_sim": True,
+                        "settlement": settlement,
+                        "order_api_called": False,
+                        "exit_reason": settlement.get("exit_reason"),
+                    }
+                )
+                print(f"{symbol}: paper-sim 청산 - {settlement.get('exit_reason')}")
+                continue
+            if settlement.get("has_position"):
+                log_signal(
+                    {
+                        "timestamp": datetime.now().isoformat(timespec="seconds"),
+                        "asset_class": "futures",
+                        "symbol": symbol,
+                        "mode": "paper-sim",
+                        "signal": "hold-position",
+                        "paper_sim": True,
+                        "settlement": settlement,
+                        "order_api_called": False,
+                    }
+                )
+                print(f"{symbol}: paper-sim 기존 포지션 유지")
+                continue
             record = futures_signal(symbol, "paper-sim", signal_data)
             record["paper_sim"] = True
             qty = int(record["contract_qty"])
@@ -1167,6 +1297,9 @@ def run_futures_paper_sim() -> int:
                 required_margin_krw=float(record["required_margin_krw"]),
                 margin_limit_krw=float(record["margin_limit_krw"]),
                 margin_check_passed=bool(record["margin_check_passed"]),
+                stop_loss=float(record["stop_loss"]),
+                target1=float(record["target1"]),
+                target2=float(record["target2"]),
             )
             record.update({"paper_sim": True, "simulated_order": result, "order_api_called": False, "simulated_pnl_krw": result.get("simulated_pnl_krw", 0.0)})
             log_signal(record)
@@ -1302,7 +1435,7 @@ def run_futures_paper_order(allow_paper_order: bool, live: bool) -> int:
         print("선물 KIS paper 주문 차단: ENABLE_FUTURES_KIS_PAPER_ORDER=False")
     for item in FUTURES_WATCHLIST:
         symbol = item["symbol"]
-        result = client.buy_futures_limit(symbol, 1, 0.0)
+        result = client.check_futures_order_gate(symbol)
         log_signal({"timestamp": datetime.now().isoformat(timespec="seconds"), "asset_class": "futures", "symbol": symbol, "mode": "paper", "signal": "blocked", "order_api_called": False, "order_block_reason": result["reason"]})
         print(f"{symbol}: KIS 선물 paper 주문 차단 - {result['reason']}")
     return 0

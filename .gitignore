@@ -5,6 +5,7 @@ data/token.json
 
 # runtime state
 data/positions.json
+data/paper_*.json
 data/trading_log.json
 data/signal_log.json
 data/cron.log

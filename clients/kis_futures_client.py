@@ -189,6 +189,17 @@ class FuturesClient(KISBaseClient):
             return self.blocked_order("close", symbol, qty, limit_price, reason)
         return self._place_futures_limit_order("close", symbol, qty, limit_price)
 
+    # check_futures_order_gate는 주문 API 호출 없이 선물 paper 주문 게이트 결과만 반환합니다.
+    def check_futures_order_gate(self, symbol: str) -> dict[str, Any]:
+        allowed, reason = self._can_call_kis_futures_order(symbol)
+        return {
+            "symbol": symbol,
+            "allowed": bool(allowed),
+            "blocked": not bool(allowed),
+            "reason": reason,
+            "order_api_called": False,
+        }
+
     # _can_call_kis_futures_order는 config, contract metadata, CLI 안전 플래그를 모두 확인합니다.
     def _can_call_kis_futures_order(self, symbol: str) -> tuple[bool, str]:
         contract = get_contract(symbol)

@@ -54,6 +54,9 @@ class PaperSimulator:
         required_margin_krw: float = 0.0,
         margin_limit_krw: float | None = None,
         margin_check_passed: bool = True,
+        stop_loss: float | None = None,
+        target1: float | None = None,
+        target2: float | None = None,
     ) -> dict[str, Any]:
         contract = get_contract(symbol)
         qty = min(int(qty), int(contract["max_contract_qty"]))
@@ -82,6 +85,9 @@ class PaperSimulator:
                 "tick_size": contract["tick_size"],
                 "tick_value": contract["tick_value_usd"],
                 "required_margin_krw": float(required_margin_krw),
+                "stop_loss": float(stop_loss) if stop_loss is not None else None,
+                "target1": float(target1) if target1 is not None else None,
+                "target2": float(target2) if target2 is not None else None,
                 "opened_at": now,
                 "last_update": now,
             }
@@ -97,6 +103,50 @@ class PaperSimulator:
         self._append_json(TRADES_FILE, trade)
         self._record_equity()
         return {"filled": True, "order_api_called": False, **trade}
+
+    # settle_futures_position은 저장된 stop/target 기준으로 KIS 없이 paper-sim 선물 포지션을 청산합니다.
+    def settle_futures_position(self, symbol: str, high: float, low: float, close: float, timestamp: str | None = None) -> dict[str, Any]:
+        positions = self._read_json(POSITIONS_FILE, {})
+        key = f"futures:{symbol}"
+        position = positions.get(key)
+        if not position:
+            return {"symbol": symbol, "has_position": False, "settled": False, "order_api_called": False}
+        contract = get_contract(symbol)
+        tick = float(contract["tick_size"])
+        qty = int(position.get("qty") or 0)
+        stop_loss = position.get("stop_loss")
+        target1 = position.get("target1")
+        target2 = position.get("target2")
+        exit_reason = None
+        exit_price = None
+        if stop_loss is not None and float(low) <= float(stop_loss):
+            exit_reason = "stop_loss"
+            exit_price = float(stop_loss) - tick
+        elif target2 is not None and float(high) >= float(target2):
+            exit_reason = "target2"
+            exit_price = float(target2) - tick
+        elif target1 is not None and float(high) >= float(target1):
+            exit_reason = "target1"
+            exit_price = float(target1) - tick
+        if exit_reason is None:
+            return {
+                "symbol": symbol,
+                "has_position": True,
+                "settled": False,
+                "mark_to_market": self.mark_to_market_futures(symbol, float(close)),
+                "order_api_called": False,
+            }
+        result = self.place_futures_order(
+            symbol,
+            "sell",
+            qty,
+            float(exit_price),
+            required_margin_krw=float(position.get("required_margin_krw") or 0.0),
+            margin_limit_krw=self.futures_capital_krw * 0.8,
+            margin_check_passed=True,
+        )
+        result.update({"settled": bool(result.get("filled")), "exit_reason": exit_reason, "settled_at": timestamp, "order_api_called": False})
+        return result
 
     # mark_to_market_futures는 현재가 기준 선물 미실현 손익을 계산합니다.
     def mark_to_market_futures(self, symbol: str, current_price: float) -> dict[str, Any]:

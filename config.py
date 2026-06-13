@@ -96,6 +96,25 @@ WATCHLIST = [{"code": row["code"], "name": row["name"], "asset_class": "domestic
 
 EXCLUDED_CODES = ["035720"]
 
+LEVERAGE_ETN_MAP = {
+    "samsung_2x_single_stock_etn": "520100",
+    "sk_hynix_2x_single_stock_etn": None,  # TODO: 종목코드 수동 검증 필요
+}
+
+LEVERAGE_ETN_WATCHLIST = [
+    {
+        "code": "520100",
+        "symbol": "520100",
+        "name": "Mirae Asset Leverage Samsung Electronics Single Stock ETN",
+        "asset_class": "domestic-stock",
+        "watch_only": True,
+        "order_route_enabled": False,
+        "position_sizing_enabled": False,
+        "order_api_called": False,
+        "block_reason": "watch_only_leveraged_etn",
+    }
+]
+
 DOMESTIC_STOCK_CAPITAL_KRW = 5_000_000
 FUTURES_PAPER_CAPITAL_KRW = 5_000_000
 FX_RATE_USDKRW = 1350
