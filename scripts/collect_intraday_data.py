@@ -30,7 +30,7 @@ from core.fetcher_intraday import (
 
 def resolve_universe(name: str, watchlist: str | None, refresh: bool = False) -> list[str]:
     if watchlist:
-        return [code.strip() for code in watchlist.split(",") if code.strip()]
+        return [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
     if name == "ai_train":
         return [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=refresh)]
     if name == "watchlist":

@@ -1,6 +1,6 @@
 # ================================================================================
 # Main Author: 김경민
-# Recently Modified Date: 2026-06-11 (V3.0)
+# Recently Modified Date: 2026-06-13 (V3.2.1b)
 # Dependency: core/fetcher_daily.py, core/technical.py
 # Description: yfinance 장중 데이터를 조회하고 미완성 5분봉을 제거합니다.
 # ================================================================================
@@ -126,8 +126,44 @@ def save_intraday_cache(code: str, data: pd.DataFrame, interval: str = "5m", sou
     out.to_csv(_cache_path(code, interval), index=False)
 
 
+def _cache_with_source(code: str, interval: str) -> pd.DataFrame:
+    """Load cache while preserving the source column for source-priority dedup.
+
+    code: Six-digit domestic-stock symbol.
+    interval: Intraday interval such as 5m.
+    """
+
+    raw = load_intraday_cache_raw(code, interval)
+    if raw.empty or "timestamp" not in raw.columns:
+        return pd.DataFrame()
+    rename = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
+    data = raw.rename(columns=rename).set_index("timestamp")
+    bars = _normalize_index(data)
+    if bars.empty:
+        return bars
+    if "source" in data.columns:
+        source = data["source"].reindex(bars.index).fillna("unknown")
+        bars["source"] = source.to_numpy()
+    else:
+        bars["source"] = "unknown"
+    return bars
+
+
+def _source_priority(value: object) -> int:
+    """Return dedup priority where KIS quotation rows beat yfinance rows."""
+
+    source = str(value or "").lower()
+    if "kis" in source:
+        return 3
+    if source in {"unknown", "", "none", "nan"}:
+        return 2
+    if "yfinance" in source:
+        return 1
+    return 0
+
+
 def merge_intraday_cache(code: str, fresh: pd.DataFrame, interval: str = "5m", source: str | None = None) -> pd.DataFrame:
-    cached = load_intraday_cache(code, interval)
+    cached = _cache_with_source(code, interval)
     fresh_bars = _normalize_index(fresh)
     if not fresh_bars.empty:
         fresh_bars["source"] = source or (str(fresh.get("source").iloc[-1]) if "source" in fresh.columns and len(fresh) else "unknown")
@@ -135,7 +171,12 @@ def merge_intraday_cache(code: str, fresh: pd.DataFrame, interval: str = "5m", s
     if not frames:
         return pd.DataFrame()
     merged = pd.concat(frames).sort_index()
-    merged = merged[~merged.index.duplicated(keep="last")]
+    if "source" not in merged.columns:
+        merged["source"] = source or "unknown"
+    merged["_source_priority"] = merged["source"].map(_source_priority)
+    merged["_row_order"] = range(len(merged))
+    merged = merged.sort_values(["_source_priority", "_row_order"]).groupby(level=0, sort=True).tail(1)
+    merged = merged.sort_index().drop(columns=["_source_priority", "_row_order"])
     save_intraday_cache(code, merged, interval, source=None)
     return merged
 

@@ -110,7 +110,9 @@ class DomesticStockClient(KISBaseClient):
         resampled = frame.resample("5min", origin="start_day", label="left", closed="left").agg(
             {"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"}
         )
-        return ensure_ohlcv(resampled.dropna(subset=["Open", "High", "Low", "Close"]))
+        resampled = resampled.dropna(subset=["Open", "High", "Low", "Close"])
+        valid_prices = (resampled[["Open", "High", "Low", "Close"]] > 0).all(axis=1)
+        return ensure_ohlcv(resampled[valid_prices])
 
     # calc_qty는 금액 기준 국내주식 수량을 계산합니다.
     def calc_qty(self, code: str, amount_krw: float) -> int:

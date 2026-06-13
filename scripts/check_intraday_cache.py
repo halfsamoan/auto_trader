@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ================================================================================
 # Main Author: Codex
-# Recently Modified Date: 2026-06-13 (V3.2)
+# Recently Modified Date: 2026-06-13 (V3.2.1b)
 # Dependency: ai/*, config.py, core/fetcher_intraday.py
 # Description: intraday cache, label, split readiness를 주문 없이 점검합니다.
 # ================================================================================
@@ -45,14 +45,36 @@ def source_counts_for(code: str, interval: str) -> dict[str, int]:
     return {str(k): int(v) for k, v in raw["source"].fillna("unknown").value_counts().to_dict().items()}
 
 
+def normalized_source_name(source: str) -> str:
+    value = str(source or "unknown").lower()
+    if "kis" in value:
+        return "kis"
+    if "yfinance" in value:
+        return "yfinance"
+    return "unknown"
+
+
+def cache_unique_times(codes: list[str], interval: str) -> int:
+    times = []
+    for code in codes:
+        data = load_intraday_cache(code, interval)
+        if not data.empty:
+            times.extend(list(data.index))
+    return int(len(set(times)))
+
+
 def gap_summary(data) -> dict[str, object]:
     if data.empty or len(data.index) < 2:
-        return {"gap_count": 0, "max_gap_minutes": None}
+        return {"gap_count": 0, "max_gap_minutes": None, "top_gap_minutes": []}
     diffs = data.index.to_series().diff().dropna()
     gaps = diffs[diffs > diffs.mode().iloc[0] if not diffs.mode().empty else diffs > diffs.median()]
     return {
         "gap_count": int(len(gaps)),
         "max_gap_minutes": float(gaps.max().total_seconds() / 60) if len(gaps) else None,
+        "top_gap_minutes": [
+            float(value.total_seconds() / 60)
+            for value in gaps.sort_values(ascending=False).head(5).to_list()
+        ],
     }
 
 
@@ -90,9 +112,67 @@ def orderbook_spread_summary(code: str) -> dict[str, object]:
     }
 
 
+def split_readiness_report(split_report: dict[str, object] | None, min_valid: int, min_test: int) -> dict[str, object]:
+    """Summarize whether purged calendar split has usable valid/test samples.
+
+    split_report: Report returned from calendar_time_split.
+    min_valid: Minimum validation samples required by the caller.
+    min_test: Minimum test samples required by the caller.
+    """
+
+    if not split_report:
+        return {
+            "data_status": "DATA_NOT_READY",
+            "reason": "no split report; cache samples are empty after sequence and label filters",
+            "guidance": "Run scripts/backfill_intraday.py repeatedly until each symbol has enough 5m bars.",
+        }
+    sizes = dict(split_report.get("sizes") or {})
+    valid_size = int(sizes.get("valid") or 0)
+    test_size = int(sizes.get("test") or 0)
+    unique_times = int(split_report.get("unique_calendar_times") or 0)
+    purge_gap = int(split_report.get("purge_gap_bars") or AI_PURGE_GAP_BARS)
+    min_unique_for_nonempty_valid = int((2 * purge_gap) / 0.15) + 1
+    min_unique_for_nonempty_test = int(purge_gap / 0.15) + 1
+    if valid_size > 0 and test_size > 0:
+        data_status = "DATA_READY"
+        reason = "valid and test splits are both non-empty"
+    else:
+        data_status = "DATA_NOT_READY"
+        if unique_times > min_unique_for_nonempty_valid:
+            reason = (
+                f"purged split still empty despite enough unique times: valid={valid_size}, test={test_size}, "
+                f"unique_calendar_times={unique_times}, purge_gap_bars={purge_gap}. "
+                "The purge gap may be too large relative to the actual date-range/cutoff layout; gap changes are a user decision."
+            )
+        else:
+            reason = (
+                f"purged split shortage: valid={valid_size}, test={test_size}, "
+                f"unique_calendar_times={unique_times}, purge_gap_bars={purge_gap}"
+            )
+    return {
+        "data_status": data_status,
+        "trainable_at_min_thresholds": valid_size >= min_valid and test_size >= min_test,
+        "reason": reason,
+        "valid_samples": valid_size,
+        "test_samples": test_size,
+        "min_valid_samples": min_valid,
+        "min_test_samples": min_test,
+        "unique_calendar_times": unique_times,
+        "estimated_min_unique_5m_bars_for_nonempty_valid": min_unique_for_nonempty_valid,
+        "estimated_min_unique_5m_bars_for_nonempty_test": min_unique_for_nonempty_test,
+        "additional_unique_5m_bars_hint": max(min_unique_for_nonempty_valid - unique_times, 0),
+        "purge_gap_not_auto_adjusted": True,
+        "guidance": (
+            "Backfill more separate trading sessions. With the current calendar split and purge gap, "
+            "valid/test can stay empty even when every symbol has several hundred rows. "
+            "Do not reduce purge_gap_bars automatically because that changes leakage risk."
+        ),
+    }
+
+
 def resolve_universe(name: str, watchlist: str | None) -> list[str]:
     if watchlist:
-        return [code.strip() for code in watchlist.split(",") if code.strip()]
+        return [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
     if name == "ai_train":
         return [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=False)]
     if name == "watchlist":
@@ -154,6 +234,8 @@ def main() -> int:
         "row_counts_bottom10": dict(sorted(row_counts.items(), key=lambda item: item[1])[:10]),
         "source_row_counts": source_counts,
         "source_row_counts_total": {},
+        "source_row_counts_total_normalized": {},
+        "cache_unique_calendar_times": cache_unique_times(codes, args.interval),
         "missing_gap_summary": gap_reports,
         "spread_summary": spread_reports,
         "abnormal_price_summary": abnormal_price_reports,
@@ -170,16 +252,22 @@ def main() -> int:
             "future_label_status_shadow_default": "pending",
         },
         "split_report": None,
+        "split_readiness": None,
         "trainable": False,
     }
     for counts in source_counts.values():
         for key, value in counts.items():
             report["source_row_counts_total"][key] = int(report["source_row_counts_total"].get(key, 0)) + int(value)
+            normalized = normalized_source_name(key)
+            report["source_row_counts_total_normalized"][normalized] = int(
+                report["source_row_counts_total_normalized"].get(normalized, 0)
+            ) + int(value)
 
     if samples:
         data = concat_samples(samples)
         _, split_report = calendar_time_split(data, SplitConfig(AI_SEQUENCE_LENGTH, AI_PRED_HORIZON_BARS, AI_PURGE_GAP_BARS))
         report["split_report"] = split_report
+        report["split_readiness"] = split_readiness_report(split_report, args.min_valid_samples, args.min_test_samples)
         valid_size = int(split_report["sizes"]["valid"])
         test_size = int(split_report["sizes"]["test"])
         report["trainable"] = valid_size >= args.min_valid_samples and test_size >= args.min_test_samples
@@ -190,6 +278,9 @@ def main() -> int:
             )
     else:
         report["training_block_reason"] = "데이터 부족: sequence_length 적용 후 샘플이 없습니다."
+
+    if report["split_readiness"] is None:
+        report["split_readiness"] = split_readiness_report(None, args.min_valid_samples, args.min_test_samples)
 
     print(json.dumps(report, ensure_ascii=False, indent=2))
     if not report["trainable"]:

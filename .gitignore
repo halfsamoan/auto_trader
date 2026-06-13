@@ -80,3 +80,7 @@ __pycache__/
 logs/
 reports/
 data/regime_cache.json
+data/intraday_cache*
+reports/
+logs/
+ai/models/

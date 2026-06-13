@@ -1,6 +1,6 @@
 # ================================================================================
 # Main Author: Codex
-# Recently Modified Date: 2026-06-13 (V3.2)
+# Recently Modified Date: 2026-06-13 (V3.2.2)
 # Dependency: ai/*, config.py, core/fetcher_intraday.py
 # Description: PatchTST policy와 tabular baseline의 readiness를 주문 없이 비교합니다.
 # ================================================================================
@@ -28,7 +28,7 @@ from ai.dataset import (
     calendar_time_split,
     concat_policy_samples,
 )
-from ai.train_baseline_lgbm import _model_backend
+from ai.train_baseline_lgbm import REPORT_PATH, _model_backend
 from ai.universe_builder import load_ai_universe_records
 from config import (
     AI_LABEL_MODE,
@@ -101,6 +101,12 @@ def main() -> int:
     test_size = int(sizes.get("test", 0))
     data_ready = valid_size >= args.min_valid_samples and test_size >= args.min_test_samples
     patchtst_present = POLICY_MODEL_PATH.exists() and POLICY_METADATA_PATH.exists()
+    baseline_report = None
+    if REPORT_PATH.exists():
+        try:
+            baseline_report = json.loads(REPORT_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            baseline_report = None
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "status": "DATA_NOT_READY" if not data_ready else "READY_FOR_OFFLINE_COMPARISON",
@@ -114,18 +120,41 @@ def main() -> int:
             "backend": backend_name,
             "dependency_status": "ok" if backend_name else "MODEL_DEPENDENCY_MISSING",
             "dependency_error": dependency_error,
-            "result_status": "DATA_NOT_READY" if not data_ready else "NOT_RUN_BY_COMPARISON_SCRIPT",
+            "report_path": str(REPORT_PATH),
+            "report_present": baseline_report is not None,
+            "result_status": (
+                baseline_report.get("status")
+                if isinstance(baseline_report, dict)
+                else ("DATA_NOT_READY" if not data_ready else "BASELINE_REPORT_MISSING")
+            ),
+            "edge_status": baseline_report.get("edge_status") if isinstance(baseline_report, dict) else None,
+            "selected_threshold": baseline_report.get("selected_threshold") if isinstance(baseline_report, dict) else None,
+            "test_metrics": baseline_report.get("test_metrics") if isinstance(baseline_report, dict) else None,
+            "overfit_report": baseline_report.get("overfit_report") if isinstance(baseline_report, dict) else None,
         },
         "patchtst_policy": {
             "model_present": patchtst_present,
             "result_status": "MODEL_MISSING" if not patchtst_present else ("DATA_NOT_READY" if not data_ready else "READY_TO_EVALUATE"),
-            "overfit_warning": "Do not prefer PatchTST over baseline until valid/test sizes and out-of-sample metrics are sufficient.",
+            "comparison_metrics": None,
+            "overfit_warning": (
+                "PatchTST has more parameters and higher overfit risk; do not prefer it over baseline until "
+                "same-split out-of-sample target precision, AUC, and cost-adjusted edge are better."
+            ),
         },
         "conclusion": (
             "DATA_NOT_READY - valid/test split is empty or too small; do not enable paper/live/leveraged ETN orders."
             if not data_ready
-            else "Comparison can be run offline, but V3.2 still must not enable order execution."
+            else (
+                "LightGBM baseline report is available; PatchTST model is missing, so no model preference can be claimed."
+                if not patchtst_present
+                else "Comparison can be run offline, but V3.2.2 still must not enable order execution."
+            )
         ),
+        "no_order_policy": {
+            "order_api_called": False,
+            "live_order_enabled": False,
+            "leveraged_etn_order_enabled": False,
+        },
     }
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
