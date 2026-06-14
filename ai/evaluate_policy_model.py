@@ -25,7 +25,16 @@ from ai.dataset import (
 )
 from ai.models.patchtst_policy_model import ACTION_CLASSES, PatchTSTPolicyModel, torch
 from behavior_tree.tree_runner import run_domestic_stock_bt_shadow
-from config import AI_LABEL_MODE, AI_PRED_HORIZON_BARS, AI_PURGE_GAP_BARS, AI_STOP_RETURN, AI_TARGET_RETURN, AI_TRAIN_UNIVERSE
+from config import (
+    AI_LABEL_MODE,
+    AI_PRED_HORIZON_BARS,
+    AI_PURGE_GAP_BARS,
+    AI_STOP_RETURN,
+    AI_TARGET_RETURN,
+    AI_TRAIN_UNIVERSE,
+    EXCLUDED_CODES,
+    LEVERAGE_ETN_WATCHLIST,
+)
 from core.fetcher_intraday import fetch_intraday
 
 
@@ -52,8 +61,12 @@ def _metrics(y_true, y_pred):
 
 def _resolve_universe(universe: str) -> list[str]:
     if universe == "ai_train":
-        return list(dict.fromkeys(AI_TRAIN_UNIVERSE))
-    return [item.strip().zfill(6) for item in universe.split(",") if item.strip()]
+        raw = list(dict.fromkeys(AI_TRAIN_UNIVERSE))
+    else:
+        raw = [item.strip().zfill(6) for item in universe.split(",") if item.strip()]
+    excluded = {str(code).zfill(6) for code in EXCLUDED_CODES}
+    excluded |= {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    return [code for code in dict.fromkeys(raw) if code not in excluded]
 
 
 def _load_test_data(sequence_length: int, universe: str, source: str):

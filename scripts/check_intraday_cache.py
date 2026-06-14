@@ -31,6 +31,7 @@ from config import (
     AI_SEQUENCE_LENGTH,
     AI_STOP_RETURN,
     AI_TARGET_RETURN,
+    EXCLUDED_CODES,
     LEVERAGE_ETN_WATCHLIST,
     ORDERBOOK_CACHE_DIR,
     WATCHLIST,
@@ -170,13 +171,22 @@ def split_readiness_report(split_report: dict[str, object] | None, min_valid: in
     }
 
 
+def excluded_codes() -> set[str]:
+    leveraged = {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    configured = {str(code).zfill(6) for code in EXCLUDED_CODES}
+    return leveraged | configured
+
+
 def resolve_universe(name: str, watchlist: str | None) -> list[str]:
     if watchlist:
-        return [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
+        raw = [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
+        return [code for code in dict.fromkeys(raw) if code not in excluded_codes()]
     if name == "ai_train":
-        return [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=False)]
+        raw = [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=False)]
+        return [code for code in dict.fromkeys(raw) if code not in excluded_codes()]
     if name == "watchlist":
-        return [str(item["code"]) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
+        raw = [str(item["code"]).zfill(6) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
+        return [code for code in dict.fromkeys(raw) if code not in excluded_codes()]
     raise ValueError("--universe는 ai_train 또는 watchlist만 허용됩니다.")
 
 
@@ -235,6 +245,7 @@ def main() -> int:
         "source_row_counts": source_counts,
         "source_row_counts_total": {},
         "source_row_counts_total_normalized": {},
+        "excluded_codes": sorted(excluded_codes()),
         "cache_unique_calendar_times": cache_unique_times(codes, args.interval),
         "missing_gap_summary": gap_reports,
         "spread_summary": spread_reports,

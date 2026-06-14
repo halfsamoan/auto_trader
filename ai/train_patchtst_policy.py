@@ -33,6 +33,8 @@ from config import (
     AI_STOP_RETURN,
     AI_TARGET_RETURN,
     AI_TRAIN_UNIVERSE,
+    EXCLUDED_CODES,
+    LEVERAGE_ETN_WATCHLIST,
     WATCHLIST,
 )
 from core.fetcher_intraday import fetch_intraday
@@ -46,10 +48,14 @@ DEFAULT_PRETRAINED_ENCODER = MODEL_DIR / "patchtst_encoder_pretrained.pt"
 
 def _resolve_universe(universe: str | None, watchlist: str | None) -> list[str]:
     if universe == "ai_train":
-        return list(dict.fromkeys(AI_TRAIN_UNIVERSE))
-    if universe == "watchlist":
-        return [str(item["code"]) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
-    return [item.strip().zfill(6) for item in (watchlist or "005930,000660").split(",") if item.strip()]
+        raw = list(dict.fromkeys(AI_TRAIN_UNIVERSE))
+    elif universe == "watchlist":
+        raw = [str(item["code"]).zfill(6) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
+    else:
+        raw = [item.strip().zfill(6) for item in (watchlist or "005930,000660").split(",") if item.strip()]
+    excluded = {str(code).zfill(6) for code in EXCLUDED_CODES}
+    excluded |= {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    return [code for code in dict.fromkeys(raw) if code not in excluded]
 
 
 def _safe_load_encoder(model, path: str | None) -> str | None:

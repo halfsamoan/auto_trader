@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from clients.kis_domestic_stock_client import DomesticStockClient
 from config import INTRADAY_CACHE_DIR, TICK_CACHE_DIR
 from core.technical import ensure_ohlcv
 from .fetcher_daily import _download_krx
@@ -184,6 +183,8 @@ def merge_intraday_cache(code: str, fresh: pd.DataFrame, interval: str = "5m", s
 def _fetch_kis_intraday(code: str, interval: str) -> pd.DataFrame:
     if interval != "5m":
         return pd.DataFrame()
+    from clients.kis_domestic_stock_client import DomesticStockClient
+
     client = DomesticStockClient(mode="paper", dry_run=True, live=False, allow_paper_order=False)
     return client.get_intraday_5m_chart(code)
 

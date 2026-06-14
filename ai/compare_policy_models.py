@@ -38,6 +38,8 @@ from config import (
     AI_STOP_RETURN,
     AI_TARGET_RETURN,
     COMMISSION,
+    EXCLUDED_CODES,
+    LEVERAGE_ETN_WATCHLIST,
     TAX,
     WATCHLIST,
 )
@@ -50,10 +52,14 @@ POLICY_METADATA_PATH = Path(__file__).resolve().parent / "model_store" / "domest
 
 def _resolve_codes(universe: str, watchlist: str | None) -> list[str]:
     if watchlist:
-        return [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
-    if universe == "ai_train":
-        return [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=False)]
-    return [str(item["code"]).zfill(6) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
+        raw = [code.strip().zfill(6) for code in watchlist.split(",") if code.strip()]
+    elif universe == "ai_train":
+        raw = [str(row["code"]).zfill(6) for row in load_ai_universe_records(refresh=False)]
+    else:
+        raw = [str(item["code"]).zfill(6) for item in WATCHLIST if item.get("asset_class") == "domestic-stock"]
+    excluded = {str(code).zfill(6) for code in EXCLUDED_CODES}
+    excluded |= {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    return [code for code in dict.fromkeys(raw) if code not in excluded]
 
 
 def _data_report(args: argparse.Namespace) -> dict[str, Any]:

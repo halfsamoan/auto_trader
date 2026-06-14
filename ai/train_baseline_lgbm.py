@@ -40,6 +40,7 @@ from config import (
     AI_STOP_RETURN,
     AI_TARGET_RETURN,
     COMMISSION,
+    EXCLUDED_CODES,
     LEVERAGE_ETN_WATCHLIST,
     TAX,
     WATCHLIST,
@@ -90,7 +91,9 @@ def _metric_backend():
 
 
 def _excluded_codes() -> set[str]:
-    return {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    leveraged = {str(row.get("code")).zfill(6) for row in LEVERAGE_ETN_WATCHLIST if row.get("code")}
+    configured = {str(code).zfill(6) for code in EXCLUDED_CODES}
+    return leveraged | configured
 
 
 def _resolve_codes(universe: str, watchlist: str | None) -> list[str]:
