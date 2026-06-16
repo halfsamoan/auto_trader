@@ -6,7 +6,9 @@ from dataclasses import asdict
 from typing import Any
 
 import numpy as np
+import pandas as pd
 
+from toa_ai.action_selection import select_executable_action
 from toa_ai.config import ReplayConfig, RiskConfig
 from toa_ai.domain import Action, OrderRequest, new_id
 from toa_ai.execution import PaperBroker
@@ -23,19 +25,32 @@ def run_replay_for_symbol(
     sequence_length: int = 64,
     replay_config: ReplayConfig | None = None,
     risk_config: RiskConfig | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> dict[str, Any]:
     replay_config = replay_config or ReplayConfig()
     risk = RiskGovernor(risk_config)
     broker = PaperBroker(memory, initial_cash=replay_config.initial_cash, risk_config=risk.config)
     data = memory.load_bars(symbol, timeframe=timeframe)
+    data = _filter_replay_dates(data, start_date=start_date, end_date=end_date)
     if len(data) < sequence_length + 2:
-        return {"symbol": symbol, "status": "skipped", "reason": "insufficient_bars", "bars": int(len(data))}
+        return {
+            "symbol": symbol,
+            "status": "skipped",
+            "reason": "insufficient_bars",
+            "bars": int(len(data)),
+            "start_date": start_date,
+            "end_date": end_date,
+        }
 
     episode_id = new_id("episode")
     start_equity = broker.account.equity
     decisions = 0
     orders = 0
-    action_counts: dict[str, int] = {}
+    raw_policy_action_counts: dict[str, int] = {}
+    selected_action_counts: dict[str, int] = {}
+    gated_action_counts: dict[str, int] = {}
+    gate_reason_counts: dict[str, int] = {}
     max_end = len(data) - 1
     if replay_config.max_episode_bars is not None:
         max_end = min(max_end, sequence_length + int(replay_config.max_episode_bars))
@@ -52,22 +67,31 @@ def run_replay_for_symbol(
             holding_bars=end,
         )
         sequence = features.iloc[-sequence_length:].to_numpy(dtype=np.float32)
-        output = policy.predict(sequence)
-        gate = risk.review(output, symbol, price, broker.account)
-        action = gate.forced_action or output.action
-        action_counts[action.value] = action_counts.get(action.value, 0) + 1
+        raw_output = policy.predict(sequence)
+        selected_output = select_executable_action(raw_output, has_position=position is not None)
+        gate = risk.review(selected_output, symbol, price, broker.account)
+        action = gate.forced_action or selected_output.action
+        _increment(raw_policy_action_counts, raw_output.action.value)
+        _increment(selected_action_counts, selected_output.action.value)
+        _increment(gated_action_counts, action.value)
+        _increment(gate_reason_counts, gate.reason)
         state = _state(symbol, price, broker.account, sequence=sequence, feature_columns=list(features.columns))
         decision_id = memory.append_decision(
             symbol=symbol,
-            model_id=output.model_id,
+            model_id=raw_output.model_id,
             action=action.value,
-            confidence=output.confidence,
-            expected_return=output.expected_return,
-            risk_score=output.risk_score,
+            confidence=selected_output.confidence,
+            expected_return=selected_output.expected_return,
+            risk_score=selected_output.risk_score,
             accepted=gate.allowed,
             state=state,
-            policy=_policy_json(output),
-            gate={"allowed": gate.allowed, "reason": gate.reason, "metadata": gate.metadata},
+            policy=_policy_json(raw_output, selected_output),
+            gate={
+                "allowed": gate.allowed,
+                "reason": gate.reason,
+                "metadata": gate.metadata,
+                "selection": _selection_json(raw_output, selected_output),
+            },
             episode_id=episode_id,
         )
         decisions += 1
@@ -85,7 +109,7 @@ def run_replay_for_symbol(
         if replay_config.record_experiences:
             memory.append_experience(
                 symbol=symbol,
-                model_id=output.model_id,
+                model_id=raw_output.model_id,
                 action=action.value,
                 reward=reward,
                 next_return=next_return,
@@ -102,9 +126,18 @@ def run_replay_for_symbol(
         "status": "ok",
         "episode_id": episode_id,
         "bars": int(max_end),
+        "input_bars": int(len(data)),
+        "start_date": start_date,
+        "end_date": end_date,
+        "data_start": data.index[0].isoformat() if len(data) else None,
+        "data_end": data.index[-1].isoformat() if len(data) else None,
         "decisions": decisions,
         "orders": orders,
-        "action_counts": action_counts,
+        "raw_policy_action_counts": raw_policy_action_counts,
+        "selected_action_counts": selected_action_counts,
+        "gated_action_counts": gated_action_counts,
+        "gate_reason_counts": gate_reason_counts,
+        "action_counts": gated_action_counts,
         "start_equity": float(start_equity),
         "final_equity": float(final_equity),
         "diagnostic_return": float(final_equity / start_equity - 1.0) if start_equity else 0.0,
@@ -127,17 +160,62 @@ def _execute_action(broker: PaperBroker, action: Action, symbol: str, price: flo
     return None
 
 
-def _policy_json(output: Any) -> dict[str, Any]:
+def _policy_json(output: Any, selected_output: Any | None = None) -> dict[str, Any]:
+    selected = selected_output or output
     return {
         "action": output.action.value,
         "confidence": output.confidence,
         "action_probs": output.action_probs,
+        "selected_action": selected.action.value,
+        "selected_confidence": selected.confidence,
         "expected_return": output.expected_return,
         "risk_score": output.risk_score,
         "holding_score": output.holding_score,
         "model_id": output.model_id,
         "metadata": output.metadata,
     }
+
+
+def _selection_json(raw_output: Any, selected_output: Any) -> dict[str, Any]:
+    return {
+        "raw_action": raw_output.action.value,
+        "raw_confidence": raw_output.confidence,
+        "selected_action": selected_output.action.value,
+        "selected_confidence": selected_output.confidence,
+        "selection_reason": selected_output.metadata.get("selection_reason"),
+        "allowed_actions": selected_output.metadata.get("allowed_actions", []),
+        "has_position": selected_output.metadata.get("has_position"),
+    }
+
+
+def _increment(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _filter_replay_dates(data: pd.DataFrame, start_date: str | None, end_date: str | None) -> pd.DataFrame:
+    if data.empty:
+        return data
+    out = data
+    if start_date:
+        out = out[out.index >= _coerce_replay_timestamp(start_date)]
+    if end_date:
+        end_ts = _coerce_replay_timestamp(end_date)
+        if _looks_like_date_only(end_date):
+            out = out[out.index < end_ts + pd.Timedelta(days=1)]
+        else:
+            out = out[out.index <= end_ts]
+    return out
+
+
+def _coerce_replay_timestamp(value: str) -> pd.Timestamp:
+    timestamp = pd.Timestamp(value)
+    if timestamp.tzinfo is None:
+        return timestamp.tz_localize("UTC")
+    return timestamp.tz_convert("UTC")
+
+
+def _looks_like_date_only(value: str) -> bool:
+    return len(value.strip()) <= 10 and "T" not in value and " " not in value
 
 
 def _state(

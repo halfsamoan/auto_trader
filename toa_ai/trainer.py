@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import copy
 import math
+import sys
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 import numpy as np
 
 from toa_ai.config import DEFAULT_MODEL_DIR, ModelConfig
-from toa_ai.domain import ACTION_CLASSES, new_id, utc_now_iso
+from toa_ai.domain import ACTION_CLASSES, ACTION_TO_ID, Action, new_id, utc_now_iso
 from toa_ai.experience import build_experience_dataset
 from toa_ai.features import PolicyDataset, build_policy_dataset_for_symbol, concat_datasets
 from toa_ai.policy import TOAPolicyNet, save_policy_payload, torch
@@ -68,6 +70,10 @@ def train_policy_v1(
     mse = torch.nn.MSELoss()
 
     history = []
+    best_state = None
+    best_metrics: dict[str, Any] | None = None
+    best_epoch = 0
+    best_validation_loss = math.inf
     for epoch in range(config.epochs):
         model.train()
         batch_losses = []
@@ -92,8 +98,17 @@ def train_policy_v1(
                 **valid_metrics,
             }
         )
+        if valid_metrics["validation_loss"] < best_validation_loss:
+            best_validation_loss = float(valid_metrics["validation_loss"])
+            best_epoch = epoch + 1
+            best_metrics = dict(valid_metrics)
+            best_state = copy.deepcopy(model.state_dict())
+        _print_epoch_progress(epoch + 1, config.epochs, history[-1], best_epoch)
 
-    final_metrics = _evaluate(model, valid, config.batch_size, device)
+    final_epoch_metrics = _evaluate(model, valid, config.batch_size, device)
+    if best_state is not None:
+        model.load_state_dict(best_state)
+    final_metrics = best_metrics or final_epoch_metrics
     model_id = f"toa-policy-v1-{utc_now_iso().replace(':', '').replace('+', 'Z')}-{new_id('m').split('_')[1][:6]}"
     model_path = Path(model_dir) / f"{model_id}.pt"
     metadata = {
@@ -115,6 +130,10 @@ def train_policy_v1(
         "skipped_symbols": skipped,
         "action_counts": dataset.action_counts,
         "history": history,
+        "best_epoch": int(best_epoch),
+        "best_validation_loss": float(best_validation_loss),
+        "final_epoch_metrics": final_epoch_metrics,
+        "checkpoint_selection_metric": "validation_loss",
         "profit_metrics_are_diagnostic_only": True,
     }
     save_policy_payload(model_path, model, metadata)
@@ -182,6 +201,21 @@ def _class_weights(actions: np.ndarray, num_classes: int) -> Any:
     return torch.tensor(weights, dtype=torch.float32)
 
 
+def _print_epoch_progress(epoch: int, epochs: int, metrics: dict[str, Any], best_epoch: int) -> None:
+    marker = " best" if epoch == best_epoch else ""
+    print(
+        "[train] "
+        f"epoch={epoch}/{epochs} "
+        f"train_loss={metrics.get('train_loss', math.nan):.6f} "
+        f"validation_loss={metrics.get('validation_loss', math.nan):.6f} "
+        f"action_accuracy={metrics.get('action_accuracy', 0.0):.4f} "
+        f"action_entropy={metrics.get('action_entropy', 0.0):.4f}"
+        f"{marker}",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def _evaluate(model: Any, dataset: PolicyDataset, batch_size: int, device: Any) -> dict[str, Any]:
     if len(dataset.x) == 0:
         return {
@@ -191,6 +225,7 @@ def _evaluate(model: Any, dataset: PolicyDataset, batch_size: int, device: Any) 
             "no_action_ratio": 1.0,
             "return_mae": math.inf,
             "risk_mae": math.inf,
+            "position_flag_diagnostics": _empty_position_flag_diagnostics(),
         }
     model.eval()
     ce = torch.nn.CrossEntropyLoss()
@@ -226,4 +261,55 @@ def _evaluate(model: Any, dataset: PolicyDataset, batch_size: int, device: Any) 
         "return_mae": float(np.mean(return_errors)) if return_errors else math.inf,
         "risk_mae": float(np.mean(risk_errors)) if risk_errors else math.inf,
         "prediction_counts": pred_counts,
+        "position_flag_diagnostics": _position_flag_diagnostics(dataset, pred_array),
+    }
+
+
+def _position_flag_diagnostics(dataset: PolicyDataset, pred_array: np.ndarray) -> dict[str, Any]:
+    if len(pred_array) == 0 or len(dataset.x) == 0:
+        return _empty_position_flag_diagnostics()
+    try:
+        position_flag_idx = dataset.feature_columns.index("position_flag")
+    except ValueError:
+        return _empty_position_flag_diagnostics()
+
+    flags = dataset.x[: len(pred_array), -1, position_flag_idx] >= 0.5
+    flat_mask = ~flags
+    position_mask = flags
+    flat_count = int(flat_mask.sum())
+    position_count = int(position_mask.sum())
+    flat_invalid_ids = {ACTION_TO_ID[Action.HOLD_LONG], ACTION_TO_ID[Action.REDUCE_LONG], ACTION_TO_ID[Action.CLOSE_LONG]}
+    position_entry_ids = {ACTION_TO_ID[Action.NO_ACTION], ACTION_TO_ID[Action.OPEN_LONG]}
+    flat_invalid_count = int(np.isin(pred_array[flat_mask], list(flat_invalid_ids)).sum()) if flat_count else 0
+    position_entry_count = int(np.isin(pred_array[position_mask], list(position_entry_ids)).sum()) if position_count else 0
+    return {
+        "flat_samples": flat_count,
+        "flat_prediction_counts": _prediction_counts_for_mask(pred_array, flat_mask),
+        "flat_holding_action_prediction_counts": _prediction_counts_for_ids(pred_array, flat_mask, flat_invalid_ids),
+        "flat_holding_action_prediction_ratio": float(flat_invalid_count / flat_count) if flat_count else 0.0,
+        "position_samples": position_count,
+        "position_prediction_counts": _prediction_counts_for_mask(pred_array, position_mask),
+        "position_entry_or_no_action_prediction_counts": _prediction_counts_for_ids(pred_array, position_mask, position_entry_ids),
+        "position_entry_or_no_action_prediction_ratio": float(position_entry_count / position_count) if position_count else 0.0,
+    }
+
+
+def _prediction_counts_for_mask(pred_array: np.ndarray, mask: np.ndarray) -> dict[str, int]:
+    return {ACTION_CLASSES[idx].value: int((pred_array[mask] == idx).sum()) for idx in range(len(ACTION_CLASSES))}
+
+
+def _prediction_counts_for_ids(pred_array: np.ndarray, mask: np.ndarray, action_ids: set[int]) -> dict[str, int]:
+    return {ACTION_CLASSES[idx].value: int((pred_array[mask] == idx).sum()) for idx in sorted(action_ids)}
+
+
+def _empty_position_flag_diagnostics() -> dict[str, Any]:
+    return {
+        "flat_samples": 0,
+        "flat_prediction_counts": {},
+        "flat_holding_action_prediction_counts": {},
+        "flat_holding_action_prediction_ratio": 0.0,
+        "position_samples": 0,
+        "position_prediction_counts": {},
+        "position_entry_or_no_action_prediction_counts": {},
+        "position_entry_or_no_action_prediction_ratio": 0.0,
     }

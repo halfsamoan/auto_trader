@@ -7,7 +7,8 @@ from typing import Any
 
 import numpy as np
 
-from toa_ai.config import ReplayConfig, RiskConfig
+from toa_ai.action_selection import select_executable_action
+from toa_ai.config import RiskConfig
 from toa_ai.domain import Action, OrderRequest
 from toa_ai.execution import PaperBroker
 from toa_ai.features import build_feature_frame
@@ -43,19 +44,33 @@ def run_paper_once(
             holding_bars=sequence_length,
         )
         output = policy.predict(features.iloc[-sequence_length:].to_numpy(dtype=np.float32))
-        gate = risk.review(output, symbol, price, broker.account)
-        action = gate.forced_action or output.action
+        selected_output = select_executable_action(output, has_position=position is not None)
+        gate = risk.review(selected_output, symbol, price, broker.account)
+        action = gate.forced_action or selected_output.action
         decision_id = memory.append_decision(
             symbol=symbol,
             model_id=output.model_id,
             action=action.value,
-            confidence=output.confidence,
-            expected_return=output.expected_return,
-            risk_score=output.risk_score,
+            confidence=selected_output.confidence,
+            expected_return=selected_output.expected_return,
+            risk_score=selected_output.risk_score,
             accepted=gate.allowed,
             state=_state(symbol, price, broker.account, sequence=features.iloc[-sequence_length:].to_numpy(dtype=np.float32), feature_columns=list(features.columns)),
-            policy=_policy_json(output),
-            gate={"allowed": gate.allowed, "reason": gate.reason, "metadata": gate.metadata},
+            policy=_policy_json(output, selected_output),
+            gate={
+                "allowed": gate.allowed,
+                "reason": gate.reason,
+                "metadata": gate.metadata,
+                "selection": {
+                    "raw_action": output.action.value,
+                    "raw_confidence": output.confidence,
+                    "selected_action": selected_output.action.value,
+                    "selected_confidence": selected_output.confidence,
+                    "selection_reason": selected_output.metadata.get("selection_reason"),
+                    "allowed_actions": selected_output.metadata.get("allowed_actions", []),
+                    "has_position": selected_output.metadata.get("has_position"),
+                },
+            },
         )
         order = None
         if gate.allowed:
@@ -66,8 +81,11 @@ def run_paper_once(
                 "status": "ok",
                 "decision_id": decision_id,
                 "policy_action": output.action.value,
+                "selected_action": selected_output.action.value,
                 "executed_action": action.value,
-                "confidence": output.confidence,
+                "policy_confidence": output.confidence,
+                "selected_confidence": selected_output.confidence,
+                "selection_reason": selected_output.metadata.get("selection_reason"),
                 "gate": {"allowed": gate.allowed, "reason": gate.reason},
                 "order": asdict(order) if order else None,
             }

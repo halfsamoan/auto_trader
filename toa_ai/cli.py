@@ -60,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     replay.add_argument("--sequence-length", type=int, default=64)
     replay.add_argument("--max-symbols", type=int, default=3)
     replay.add_argument("--max-episode-bars", type=int, default=200)
+    replay.add_argument("--start-date", default=None)
+    replay.add_argument("--end-date", default=None)
 
     paper = sub.add_parser("paper-once")
     paper.add_argument("--model-id", default="champion")
@@ -133,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
                 timeframe=args.timeframe,
                 sequence_length=args.sequence_length,
                 replay_config=ReplayConfig(max_episode_bars=args.max_episode_bars),
+                start_date=args.start_date,
+                end_date=args.end_date,
             )
             for symbol in symbols
         ]

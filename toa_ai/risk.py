@@ -12,6 +12,9 @@ from toa_ai.config import RiskConfig
 from toa_ai.domain import AccountState, Action, GateResult, PolicyOutput
 
 
+ORDER_ACTIONS = frozenset({Action.OPEN_LONG, Action.REDUCE_LONG, Action.CLOSE_LONG})
+
+
 class RiskGovernor:
     def __init__(self, config: RiskConfig | None = None) -> None:
         self.config = config or RiskConfig()
@@ -19,8 +22,6 @@ class RiskGovernor:
     def review(self, policy: PolicyOutput, symbol: str, price: float, account: AccountState, live_order: bool = False) -> GateResult:
         if live_order and not self.config.allow_live_order:
             return GateResult(False, "live_order_disabled", forced_action=Action.NO_ACTION, metadata=asdict(self.config))
-        if policy.confidence < self.config.min_model_confidence_for_execution:
-            return GateResult(False, "model_confidence_below_execution_floor", forced_action=Action.NO_ACTION, metadata=asdict(self.config))
         if account.equity <= 0:
             return GateResult(False, "account_equity_non_positive", forced_action=Action.NO_ACTION, metadata=asdict(self.config))
         if account.daily_realized_pnl <= -account.equity * self.config.max_daily_loss_fraction:
@@ -39,5 +40,7 @@ class RiskGovernor:
 
         if policy.action in {Action.HOLD_LONG, Action.REDUCE_LONG, Action.CLOSE_LONG} and symbol not in account.positions:
             return GateResult(False, "holding_action_without_position", forced_action=Action.NO_ACTION, metadata=asdict(self.config))
+        if policy.action in ORDER_ACTIONS and policy.confidence < self.config.min_model_confidence_for_execution:
+            return GateResult(False, "model_confidence_below_execution_floor", forced_action=Action.NO_ACTION, metadata=asdict(self.config))
 
         return GateResult(True, "allowed", metadata=asdict(self.config))

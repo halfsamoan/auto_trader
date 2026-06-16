@@ -219,9 +219,9 @@ def _entry_label(data: pd.DataFrame, idx: int, config: ModelConfig) -> dict[str,
         return {"action": Action.NO_ACTION, "expected_return": 0.0, "risk": 1.0}
     target = entry * (1.0 + config.target_return)
     stop = entry * (1.0 + config.stop_return)
-    for _, row in future.iterrows():
-        high = float(row["high"])
-        low = float(row["low"])
+    highs = future["high"].to_numpy(dtype=np.float64)
+    lows = future["low"].to_numpy(dtype=np.float64)
+    for high, low in zip(highs, lows):
         if low <= stop and high >= target:
             return {"action": Action.NO_ACTION, "expected_return": config.stop_return, "risk": 1.0}
         if high >= target:
@@ -242,9 +242,9 @@ def _holding_label(data: pd.DataFrame, idx: int, config: ModelConfig) -> dict[st
     stop = current * (1.0 + config.stop_return)
     target = current * (1.0 + config.target_return)
     target2 = current * (1.0 + config.target_return * 2.0)
-    for _, row in future.iterrows():
-        high = float(row["high"])
-        low = float(row["low"])
+    highs = future["high"].to_numpy(dtype=np.float64)
+    lows = future["low"].to_numpy(dtype=np.float64)
+    for high, low in zip(highs, lows):
         if low <= stop:
             return {"action": Action.CLOSE_LONG, "expected_return": config.stop_return, "risk": 1.0}
         if high >= target2:
