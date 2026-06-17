@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/k/auto_trader
+cd "$(dirname "$0")/.."
 
 .venv/bin/python -c 'import sqlite3
 db = "data/toa_ai/btc_1m.sqlite3"

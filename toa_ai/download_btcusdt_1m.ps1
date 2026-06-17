@@ -1,9 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Root = "C:\auto_trader"
-if (-not (Test-Path $Root)) {
-  $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-}
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 $Out = Join-Path $Root "data\external\binance\BTCUSDT_1m"
 New-Item -ItemType Directory -Force -Path $Out | Out-Null

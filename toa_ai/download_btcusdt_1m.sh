@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="/home/k/auto_trader"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/data/external/binance/BTCUSDT_1m"
 
 mkdir -p "$OUT"

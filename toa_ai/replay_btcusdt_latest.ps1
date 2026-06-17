@@ -1,9 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$Root = "C:\auto_trader"
-if (-not (Test-Path $Root)) {
-  $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-}
+$Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 Set-Location $Root
 
 $Python = ".\.venv\Scripts\python.exe"

@@ -190,12 +190,14 @@ def gate_report(cpcv_report: dict[str, Any], test_once: dict[str, Any], args: ar
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     symbols = _parse_symbols(args.symbols)
     symbol_reports = {symbol: evaluate_symbol(symbol, args) for symbol in symbols}
-    statuses = [row.get("edge_status") for row in symbol_reports.values()]
-    if any(status == "INSUFFICIENT_FUTURES_DATA" for status in statuses):
+    statuses = [str(row.get("edge_status") or "") for row in symbol_reports.values()]
+    run_statuses = [str(row.get("status") or "") for row in symbol_reports.values()]
+    data_blockers = {"DATA_NOT_READY", "INSUFFICIENT_FUTURES_DATA", "INSUFFICIENT_TRADES", "MODEL_DEPENDENCY_MISSING"}
+    if any(status.startswith("INSUFFICIENT") or status in data_blockers for status in [*statuses, *run_statuses]):
         final_status = "INSUFFICIENT_FUTURES_DATA"
     elif all(status == "FUTURES_EDGE_CANDIDATE" for status in statuses):
         final_status = "FUTURES_EDGE_CANDIDATE"
-    elif any(status == "COST_SENSITIVITY_POSITIVE_ONLY" for status in statuses):
+    elif statuses and all(status in {"FUTURES_EDGE_CANDIDATE", "COST_SENSITIVITY_POSITIVE_ONLY"} for status in statuses):
         final_status = "COST_SENSITIVITY_POSITIVE_ONLY"
     else:
         final_status = "EDGE_NOT_CONFIRMED"
@@ -224,6 +226,11 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             "requires_dsr_probability_at_least": args.min_dsr_probability,
             "requires_pbo_at_most": args.max_pbo,
             "requires_test_trades_at_least": args.min_selected_trades,
+        },
+        "aggregate_gate": {
+            "symbol_edge_statuses": {symbol: row.get("edge_status") for symbol, row in symbol_reports.items()},
+            "symbol_run_statuses": {symbol: row.get("status") for symbol, row in symbol_reports.items()},
+            "requires_all_symbols_to_pass": True,
         },
         "symbol_reports": symbol_reports,
         "overlap_warning": "MNQ and MES are correlated US equity index futures; passing both is not equivalent to two independent samples.",

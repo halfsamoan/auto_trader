@@ -29,7 +29,7 @@ The Linux laptop already confirmed:
 From PowerShell:
 
 ```powershell
-cd C:\auto_trader
+cd C:\dev\auto_trader
 py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
@@ -39,7 +39,7 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## Data Pipeline
 
-Run these from `C:\auto_trader`:
+Run these from the repository root, for example `C:\dev\auto_trader`:
 
 ```powershell
 .\toa_ai\download_btcusdt_1m.ps1

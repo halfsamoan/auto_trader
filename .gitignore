@@ -28,12 +28,14 @@ venv/
 env/
 
 # data cache
+data/external/
 data/intraday_cache/*.csv
 data/intraday_cache/*.parquet
 data/tick_cache/*.csv
 data/tick_cache/*.parquet
 data/orderbook_cache/*.csv
 data/orderbook_cache/*.parquet
+data/toa_ai/
 
 # model artifacts
 ai/model_store/*.pt

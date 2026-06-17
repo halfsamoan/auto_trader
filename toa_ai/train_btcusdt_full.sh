@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /home/k/auto_trader
+cd "$(dirname "$0")/.."
 
 .venv/bin/python -m toa_ai.cli --db-path data/toa_ai/btc_1m.sqlite3 train \
   --timeframe 1m \

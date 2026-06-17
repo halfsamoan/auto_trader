@@ -51,6 +51,7 @@ def run_replay_for_symbol(
     selected_action_counts: dict[str, int] = {}
     gated_action_counts: dict[str, int] = {}
     gate_reason_counts: dict[str, int] = {}
+    accepted_counts: dict[str, int] = {}
     max_end = len(data) - 1
     if replay_config.max_episode_bars is not None:
         max_end = min(max_end, sequence_length + int(replay_config.max_episode_bars))
@@ -75,6 +76,7 @@ def run_replay_for_symbol(
         _increment(selected_action_counts, selected_output.action.value)
         _increment(gated_action_counts, action.value)
         _increment(gate_reason_counts, gate.reason)
+        _increment(accepted_counts, "accepted" if gate.allowed else "rejected")
         state = _state(symbol, price, broker.account, sequence=sequence, feature_columns=list(features.columns))
         decision_id = memory.append_decision(
             symbol=symbol,
@@ -89,6 +91,7 @@ def run_replay_for_symbol(
             gate={
                 "allowed": gate.allowed,
                 "reason": gate.reason,
+                "forced_action": gate.forced_action.value if gate.forced_action else None,
                 "metadata": gate.metadata,
                 "selection": _selection_json(raw_output, selected_output),
             },
@@ -134,9 +137,11 @@ def run_replay_for_symbol(
         "decisions": decisions,
         "orders": orders,
         "raw_policy_action_counts": raw_policy_action_counts,
+        "policy_action_counts": raw_policy_action_counts,
         "selected_action_counts": selected_action_counts,
         "gated_action_counts": gated_action_counts,
         "gate_reason_counts": gate_reason_counts,
+        "accepted_counts": accepted_counts,
         "action_counts": gated_action_counts,
         "start_equity": float(start_equity),
         "final_equity": float(final_equity),
