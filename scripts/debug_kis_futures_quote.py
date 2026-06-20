@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -25,6 +26,12 @@ ENDPOINT = "/uapi/overseas-futureoption/v1/quotations/inquire-price"
 TR_ID = "HHDFC55010000"
 REQUIRED_HEADER_KEYS = ["authorization", "appkey", "appsecret", "tr_id", "tr_cont", "custtype"]
 ORDER_API_CALLED = False
+SENSITIVE_PREVIEW_PATTERNS = [
+    re.compile(r'(?i)(access_token["\']?\s*[:=]\s*["\']?)([^"\'\s,}]+)'),
+    re.compile(r'(?i)(authorization["\']?\s*[:=]\s*["\']?Bearer\s+)([^"\'\s,}]+)'),
+    re.compile(r'(?i)(appkey["\']?\s*[:=]\s*["\']?)([^"\'\s,}]+)'),
+    re.compile(r'(?i)(appsecret["\']?\s*[:=]\s*["\']?)([^"\'\s,}]+)'),
+]
 
 
 def load_env() -> None:
@@ -34,6 +41,13 @@ def load_env() -> None:
 
 def paper_base_url() -> str:
     return "https://openapivts.koreainvestment.com:29443"
+
+
+def redact_preview(text: str, limit: int = 300) -> str:
+    preview = str(text)[:limit]
+    for pattern in SENSITIVE_PREVIEW_PATTERNS:
+        preview = pattern.sub(r"\1<redacted>", preview)
+    return preview
 
 
 def load_cached_token() -> str | None:
@@ -97,7 +111,7 @@ def get_access_token(base_url: str) -> str | None:
         print("access token 확인: 실패")
         print(f"token_http_status={response.status_code}")
         print(f"token_content_type={response.headers.get('content-type')}")
-        print(f"token_response_preview={response.text[:300]!r}")
+        print(f"token_response_preview={redact_preview(response.text)!r}")
         return None
 
     try:
@@ -106,7 +120,7 @@ def get_access_token(base_url: str) -> str | None:
         print("access token 확인: 실패")
         print("token_response_json_parse=False")
         print(f"token_content_type={response.headers.get('content-type')}")
-        print(f"token_response_preview={response.text[:300]!r}")
+        print(f"token_response_preview={redact_preview(response.text)!r}")
         return None
 
     token = data.get("access_token") if isinstance(data, dict) else None
@@ -161,13 +175,13 @@ def run_quote_request(code: str) -> int:
     except requests.RequestException as exc:
         print("HTTP status=None")
         print("content-type=None")
-        print(f"response_preview={str(exc)[:300]!r}")
+        print(f"response_preview={redact_preview(str(exc))!r}")
         print(f"order_api_called={ORDER_API_CALLED}")
         return 1
 
     print(f"HTTP status={response.status_code}")
     print(f"content-type={response.headers.get('content-type')}")
-    print(f"response_preview={response.text[:300]!r}")
+    print(f"response_preview={redact_preview(response.text)!r}")
     print(f"order_api_called={ORDER_API_CALLED}")
     return 0 if response.ok else 1
 

@@ -1,88 +1,56 @@
-.env# secrets / config
+# Secrets and local configuration
 .env
 .env.*
+!.env.example
 data/token.json
 
-# runtime state
+# Runtime state
 data/positions.json
 data/paper_*.json
 data/trading_log.json
 data/signal_log.json
 data/cron.log
+data/regime_cache.json
 logs/
+reports/
 *.log
 
-# python cache / build
+# Local market data and generated databases
+data/external/
+data/intraday_cache/
+data/tick_cache/
+data/orderbook_cache/
+data/toa_ai/
+*.sqlite
+*.sqlite3
+*.db
+
+# Generated AI/model artifacts
+ai/model_store/*
+!ai/model_store/
+!ai/model_store/.gitkeep
+data/ai_universe/ai_train_universe.json
+!data/ai_universe/
+!data/ai_universe/ai_train_universe.example.json
+
+# Python cache, build output, and virtual environments
 __pycache__/
 **/__pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 build/
 dist/
-
-# virtual env
 .venv/
 venv/
 env/
 
-# data cache
-data/external/
-data/intraday_cache/*.csv
-data/intraday_cache/*.parquet
-data/tick_cache/*.csv
-data/tick_cache/*.parquet
-data/orderbook_cache/*.csv
-data/orderbook_cache/*.parquet
-data/toa_ai/
-
-# model artifacts
-ai/model_store/*.pt
-ai/model_store/*.pth
-ai/model_store/*.pkl
-ai/model_store/*.joblib
-ai/model_store/*.onnx
-
-# editor / os
+# Editor and OS files
 .vscode/
 .idea/
 .DS_Store
-.env.*
-data/token.json
-data/positions.json
-data/trading_log.json
-data/signal_log.json
-data/cron.log
-**pycache__/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-*.egg-info/
-build/
-dist/
-data/intraday_cache/*.csv
-data/intraday_cache/*.parquet
-data/tick_cache/*.csv
-data/orderbook_cache/*.csv
-ai/model_store/*.pt
-ai/model_store/*.pkl
-ai/model_store/*.json
-logs/*.log
-data/ai_universe/ai_train_universe.json
-!data/ai_universe/ai_train_universe.example.json
-!ai/model_store/.gitkeep
-
-.env
-.eve
-.venv/
-__pycache__/
-*.pyc
-logs/
-reports/
-data/regime_cache.json
-data/intraday_cache*
-reports/
-logs/
-ai/models/
+Thumbs.db
