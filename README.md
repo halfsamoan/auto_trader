@@ -1,195 +1,42 @@
-# auto_trader
+# Auto Trader
 
-`auto_trader` is a Python research and paper-trading lab for Korea domestic stocks, CME micro futures experiments, and TOA AI policy testing. It is built around conservative defaults: dry-run and paper modes are the normal path, real order execution is blocked unless several explicit safety gates are changed and verified.
+국내 주식과 해외 선물의 전략을 백테스트하고 모의 실행하는 Python 도구입니다.
 
-This repository is public for study, simulation, and extension. It is not financial advice, and it should not be used with real money until the broker routes, risk controls, and market assumptions have been independently audited.
+KIS 시세·계좌 어댑터, 장중 데이터 수집, 전략 신호와 위험 제한을 함께 실험합니다.
 
-## What is included
+## Install
 
-- KIS Open API client scaffolding for domestic-stock quotation, balance, and guarded paper-order flows.
-- Overseas futures paper-simulation and KIS futures probe scaffolding for `MNQ` and `MES`.
-- Intraday backtests, paper simulations, risk management, and behavior-tree experiments.
-- PatchTST-style AI signal/policy training utilities and evaluation scripts.
-- TOA AI memory, training, promotion, replay, and paper-once CLI workflows.
+Python 환경에서 저장소 루트에서 실행합니다.
 
-## Safety status
-
-- `ENABLE_REAL_ORDER` is `False` by default.
-- Futures KIS paper orders are blocked by default with `ENABLE_FUTURES_KIS_PAPER_ORDER=False` and `FUTURES_KIS_ENDPOINTS_VERIFIED=False`.
-- `--kis-live-probe` calls quote/account probe endpoints only; it does not place orders.
-- `.env`, token caches, runtime paper-trade files, model artifacts, local databases, and market-data caches are ignored by Git.
-- Account numbers are masked in futures probe output where the code prints account context.
-
-## Requirements
-
-- Python 3.11 or newer is recommended.
-- KIS Open API credentials are only needed for KIS quotation, account, paper-check, or broker-probe paths.
-- Optional AI workflows require the packages in `requirements-ai.txt`.
-
-## Setup
-
-```bash
-python -m venv .venv
-```
-
-Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+```sh
 python -m pip install -r requirements.txt
 ```
 
-macOS/Linux:
+## Quickstart
 
-```bash
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+주문을 보내지 않는 신호 실행입니다. 시세 데이터 접근에는 네트워크가 필요합니다.
 
-Optional AI dependencies:
-
-```bash
-python -m pip install -r requirements-ai.txt
-```
-
-## Configuration
-
-Copy the sample environment file and fill in your own values locally:
-
-```bash
-cp .env.example .env
-```
-
-On Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Never commit `.env`, API keys, app secrets, access tokens, account numbers, downloaded market data, local databases, or trained model artifacts.
-
-Important KIS variables:
-
-- `KIS_MODE=paper`
-- `KIS_APP_KEY`
-- `KIS_APP_SECRET`
-- `KIS_ACCOUNT_NO`
-- `KIS_ACCOUNT_PRODUCT_CODE`
-- `KIS_FUTURES_ACCOUNT_NO`
-- `KIS_FUTURES_ACCOUNT_PRODUCT_CODE`
-- `KIS_FUTURES_MNQ_PRODUCT_CODE`
-- `KIS_FUTURES_MES_PRODUCT_CODE`
-
-## Common commands
-
-Safe dry runs:
-
-```bash
+```sh
 python main.py --dry-run --asset domestic-stock
-python main.py --dry-run --asset futures
 ```
 
-Paper-check paths:
+KIS 기능을 사용하려면 `.env.example`을 바탕으로 로컬 `.env`에 인증 정보를 설정합니다. 데이터 소스와 실행 모드에 따른 설정은 [실행 안내](CONTRIBUTING.md)를 따릅니다.
 
-```bash
-python main.py --paper-check --asset domestic-stock
-python main.py --paper-check --asset futures
-python main.py --paper-check --asset futures --kis-live-probe
-```
+## 실험 범위
 
-Paper simulation without broker order calls:
+- **국내 주식:** 시세 조회, 전략 신호, 장중 백테스트와 모의 흐름을 실행합니다.
+- **해외 선물:** MNQ·MES 데이터와 모의 시뮬레이션을 다룹니다.
+- **학습·리플레이:** TOA AI와 정책 모델 실험 도구를 포함합니다.
+- **위험 제한:** 주문 모드와 자산별 게이트를 구분합니다.
 
-```bash
-python main.py --paper-sim --asset futures
-python backtest_futures.py --watchlist MNQ,MES --period 60d --capital 5000000
-python backtest_intraday.py --watchlist 005930,000660 --period 60d --kr-amount 5000000
-```
+## 주문 상태
 
-Domestic-stock paper watch is guarded and should only be used after reviewing the code, environment, and account setup:
+`ENABLE_REAL_ORDER=False`가 기본값입니다. 해외 선물 KIS 모의 주문도 검증 플래그가 꺼져 있어 차단됩니다. `--kis-live-probe`는 시세·계좌 조회 경로입니다.
 
-```bash
-python main.py --paper-watch --asset domestic-stock --interval-sec 300
-```
+백테스트와 모의 결과는 실거래 성과를 입증하지 않습니다. 브로커 주문 경로의 검증이 남아 있으며, 이 README의 빠른 시작은 주문 권한을 켜지 않습니다.
 
-Paper order paths require explicit flags and paper-mode configuration. Review the code and broker documentation before enabling them:
-
-```bash
-python main.py --paper --asset domestic-stock --allow-paper-order
-python main.py --paper --asset futures --allow-paper-order
-```
-
-## Data collection
-
-Dry-run the domestic intraday collection plan:
-
-```bash
-python scripts/backfill_intraday.py --symbols all --source auto --dry-run
-```
-
-Collect quote-only data into ignored local caches:
-
-```bash
-python scripts/backfill_intraday.py --symbols 005930,000660 --source yfinance --period 60d
-python scripts/collect_intraday_data.py --universe ai_train --source auto --period 5d --interval 5m
-```
-
-Generated files under `data/intraday_cache`, `data/external`, `data/toa_ai`, `reports`, and `ai/model_store` are intentionally local-only.
-
-## TOA AI workflow
-
-Initialize or inspect the TOA memory database:
-
-```bash
-python -m toa_ai.cli init-db
-python -m toa_ai.cli status
-```
-
-Run a synthetic smoke test:
-
-```bash
-python -m toa_ai.cli smoke-test --epochs 1
-```
-
-Ingest local cache data, train, promote, and replay:
-
-```bash
-python -m toa_ai.cli ingest-cache --cache-dir data/intraday_cache --timeframe 5m --limit-symbols 5
-python -m toa_ai.cli train --epochs 4 --max-symbols 5
-python -m toa_ai.cli promote --model-id latest
-python -m toa_ai.cli replay --model-id champion --max-symbols 3
-```
-
-## Notes and cautions
-
-- Backtest, paper-sim, and smoke-test results do not guarantee future performance.
-- yfinance intraday data has limited history and may differ from broker data.
-- KIS overseas futures endpoint names, TR IDs, body fields, product-code mappings, and margin logic must be manually verified before any order path is enabled.
-- The project currently favors experimentation and safety gates over production-grade reliability.
-- Keep credentials local. If a secret is ever committed, rotate it immediately and rewrite the Git history before relying on the repository.
-- Check tax, commission, slippage, exchange holidays, trading halts, daily price limits, and broker-specific order semantics before expanding execution scope.
-
-## Validation
-
-Recommended checks before publishing or merging changes:
-
-```bash
-python -m compileall .
-python -m toa_ai.cli smoke-test --epochs 1
-python scripts/backfill_intraday.py --symbols 005930 --source yfinance --dry-run
-```
-
-## Roadmap
-
-- Verify KIS overseas futures paper-trading endpoints, TR IDs, request bodies, and error handling against official broker samples.
-- Add automated tests for risk gates, order blocking, token redaction, paper-sim fills, and TOA promotion logic.
-- Add CI for linting, import checks, smoke tests, and secret scanning.
-- Separate broker adapters from strategy logic so simulations and live probes share less mutable state.
-- Improve model registry metadata and reproducibility for AI training runs.
-- Add documented examples for custom universes, external CSV ingestion, and replay reports.
-- Harden logging so all broker/account/token details are centrally redacted.
+[환경 설정·명령 목록](CONTRIBUTING.md) · [별도 TOA AI 패키지](https://github.com/halfsamoan/TOa_ai)
 
 ## License
 
-This project is distributed under the MIT License. See [LICENSE](LICENSE).
+[MIT](LICENSE).
