@@ -1,195 +1,72 @@
-# 개발·검증 참고
+# Configuration and experiment commands
 
-[프로젝트 소개](README.md)
+## Environment
 
-기존 README의 상세 실행·검증 내용을 이 문서로 옮겼습니다. 과거 실행 기록은 당시 환경의 결과이며 새 검증 결과를 뜻하지 않습니다.
-
-## What is included
-
-- KIS Open API client scaffolding for domestic-stock quotation, balance, and guarded paper-order flows.
-- Overseas futures paper-simulation and KIS futures probe scaffolding for `MNQ` and `MES`.
-- Intraday backtests, paper simulations, risk management, and behavior-tree experiments.
-- PatchTST-style AI signal/policy training utilities and evaluation scripts.
-- TOA AI memory, training, promotion, replay, and paper-once CLI workflows.
-
-## Safety status
-
-- `ENABLE_REAL_ORDER` is `False` by default.
-- Futures KIS paper orders are blocked by default with `ENABLE_FUTURES_KIS_PAPER_ORDER=False` and `FUTURES_KIS_ENDPOINTS_VERIFIED=False`.
-- `--kis-live-probe` calls quote/account probe endpoints only; it does not place orders.
-- `.env`, token caches, runtime paper-trade files, model artifacts, local databases, and market-data caches are ignored by Git.
-- Account numbers are masked in futures probe output where the code prints account context.
-
-## Requirements
-
-- Python 3.11 or newer is recommended.
-- KIS Open API credentials are only needed for KIS quotation, account, paper-check, or broker-probe paths.
-- Optional AI workflows require the packages in `requirements-ai.txt`.
-
-## Setup
-
-```bash
+```sh
 python -m venv .venv
 ```
 
-Windows PowerShell:
+Activate the environment for your shell and install:
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
+```sh
 python -m pip install -r requirements.txt
 ```
 
-macOS/Linux:
+Optional training dependencies are in `requirements-ai.txt`. Copy `.env.example` to a local `.env` when using KIS functions. Credentials include application keys, secrets, account/product identifiers, and futures product-code mappings; do not publish their values.
 
-```bash
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-```
+## Non-order paths
 
-Optional AI dependencies:
-
-```bash
-python -m pip install -r requirements-ai.txt
-```
-
-## Configuration
-
-Copy the sample environment file and fill in your own values locally:
-
-```bash
-cp .env.example .env
-```
-
-On Windows PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Never commit `.env`, API keys, app secrets, access tokens, account numbers, downloaded market data, local databases, or trained model artifacts.
-
-Important KIS variables:
-
-- `KIS_MODE=paper`
-- `KIS_APP_KEY`
-- `KIS_APP_SECRET`
-- `KIS_ACCOUNT_NO`
-- `KIS_ACCOUNT_PRODUCT_CODE`
-- `KIS_FUTURES_ACCOUNT_NO`
-- `KIS_FUTURES_ACCOUNT_PRODUCT_CODE`
-- `KIS_FUTURES_MNQ_PRODUCT_CODE`
-- `KIS_FUTURES_MES_PRODUCT_CODE`
-
-## Common commands
-
-Safe dry runs:
-
-```bash
+```sh
 python main.py --dry-run --asset domestic-stock
 python main.py --dry-run --asset futures
-```
-
-Paper-check paths:
-
-```bash
 python main.py --paper-check --asset domestic-stock
 python main.py --paper-check --asset futures
-python main.py --paper-check --asset futures --kis-live-probe
 ```
 
-Paper simulation without broker order calls:
+These paths still depend on the configured data source and network. `--kis-live-probe` enables quote/account probing, not an order submission.
 
-```bash
+## Simulation and backtesting
+
+```sh
 python main.py --paper-sim --asset futures
 python backtest_futures.py --watchlist MNQ,MES --period 60d --capital 5000000
 python backtest_intraday.py --watchlist 005930,000660 --period 60d --kr-amount 5000000
 ```
 
-Domestic-stock paper watch is guarded and should only be used after reviewing the code, environment, and account setup:
-
-```bash
-python main.py --paper-watch --asset domestic-stock --interval-sec 300
-```
-
-Paper order paths require explicit flags and paper-mode configuration. Review the code and broker documentation before enabling them:
-
-```bash
-python main.py --paper --asset domestic-stock --allow-paper-order
-python main.py --paper --asset futures --allow-paper-order
-```
+Returned data depends on source coverage. Commission, slippage, exchange hours, contract mapping, and fill assumptions must be considered when interpreting the output.
 
 ## Data collection
 
-Dry-run the domestic intraday collection plan:
+Inspect a collection plan without downloading market data:
 
-```bash
+```sh
 python scripts/backfill_intraday.py --symbols all --source auto --dry-run
 ```
 
-Collect quote-only data into ignored local caches:
+Downloaded caches, local reports, databases, token caches, and trained models are not source assets.
 
-```bash
-python scripts/backfill_intraday.py --symbols 005930,000660 --source yfinance --period 60d
-python scripts/collect_intraday_data.py --universe ai_train --source auto --period 5d --interval 5m
-```
+## TOA workflow
 
-Generated files under `data/intraday_cache`, `data/external`, `data/toa_ai`, `reports`, and `ai/model_store` are intentionally local-only.
-
-## TOA AI workflow
-
-Initialize or inspect the TOA memory database:
-
-```bash
+```sh
 python -m toa_ai.cli init-db
 python -m toa_ai.cli status
-```
-
-Run a synthetic smoke test:
-
-```bash
 python -m toa_ai.cli smoke-test --epochs 1
 ```
 
-Ingest local cache data, train, promote, and replay:
+The separate TOA AI repository contains the package-focused workflow. This repository also includes market-data, broker, and strategy experiments beyond that package.
 
-```bash
-python -m toa_ai.cli ingest-cache --cache-dir data/intraday_cache --timeframe 5m --limit-symbols 5
-python -m toa_ai.cli train --epochs 4 --max-symbols 5
-python -m toa_ai.cli promote --model-id latest
-python -m toa_ai.cli replay --model-id champion --max-symbols 3
-```
+## Order boundaries
 
-## Notes and cautions
+`ENABLE_REAL_ORDER=False` is the default. Futures paper orders require both an explicit enable flag and verified KIS futures endpoints. Endpoint names, transaction IDs, product codes, request fields, and margin behavior must be established against the configured broker environment before enabling an order path.
 
-- Backtest, paper-sim, and smoke-test results do not guarantee future performance.
-- yfinance intraday data has limited history and may differ from broker data.
-- KIS overseas futures endpoint names, TR IDs, body fields, product-code mappings, and margin logic must be manually verified before any order path is enabled.
-- The project currently favors experimentation and safety gates over production-grade reliability.
-- Keep credentials local. If a secret is ever committed, rotate it immediately and rewrite the Git history before relying on the repository.
-- Check tax, commission, slippage, exchange holidays, trading halts, daily price limits, and broker-specific order semantics before expanding execution scope.
+The commands above do not enable those flags. Synthetic training, backtests, and paper replay cannot establish live execution reliability or future returns.
 
 ## Validation
 
-Recommended checks before publishing or merging changes:
+Use module-specific checks for the code being changed. A useful package-level syntax check is:
 
-```bash
-python -m compileall .
-python -m toa_ai.cli smoke-test --epochs 1
-python scripts/backfill_intraday.py --symbols 005930 --source yfinance --dry-run
+```sh
+python -m compileall toa_ai
 ```
 
-## Roadmap
-
-- Verify KIS overseas futures paper-trading endpoints, TR IDs, request bodies, and error handling against official broker samples.
-- Add automated tests for risk gates, order blocking, token redaction, paper-sim fills, and TOA promotion logic.
-- Add CI for linting, import checks, smoke tests, and secret scanning.
-- Separate broker adapters from strategy logic so simulations and live probes share less mutable state.
-- Improve model registry metadata and reproducibility for AI training runs.
-- Add documented examples for custom universes, external CSV ingestion, and replay reports.
-- Harden logging so all broker/account/token details are centrally redacted.
-
-## License
-
-This project is distributed under the MIT License. See [LICENSE](LICENSE).
+Do not run a broker probe or order mode merely to validate a documentation change. Keep private accounts and credentials out of logs and reports.
